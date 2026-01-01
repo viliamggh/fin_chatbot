@@ -57,11 +57,33 @@ cd src && uv run python main.py
 
 ---
 
-## Upcoming Phases
+### Phase 2: Chat History & Context ✅
+**Tag**: `phase-02-chat-history`
+**Date**: 2026-01-01
+**Key Concepts**:
+- Message history management
+- Context-aware conversations
+- Multi-turn dialogue
+- Stateful vs stateless design
 
-### Phase 2: Chat History & Context
-**Tag**: `phase-02-chat-history` (pending)
-**Key Concepts**: Message history, context management, multi-turn dialogue
+**Key Files**:
+- `src/main.py` - Chat with conversation history
+
+**What You'll Learn**:
+- Maintaining conversation state across turns
+- Building message history lists
+- Sending full context with each API call
+- Preserving history integrity during errors
+
+**Test Command**:
+```bash
+cd src && uv run python main.py
+# Try: "My name is John" followed by "What's my name?"
+```
+
+---
+
+## Upcoming Phases
 
 ### Phase 3: Tool Calling (Function Calling)
 **Tag**: `phase-03-tool-calling` (pending)
