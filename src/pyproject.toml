@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "openai>=1.66.3",
     "python-dotenv",
+    "pyodbc",
 ]
 
 [tool.uv]

@@ -1,56 +1,16 @@
 """
 fin_chatbot - Natural Language to SQL Chatbot
 
-Phase 3: Tool calling (function calling) with mock SQL execution
+Phase 4: Real Azure SQL Database connection and queries
 """
 
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 import os
 import json
+import db
 
 load_dotenv()
-
-
-def execute_sql(query: str) -> str:
-    """
-    Mock SQL execution function that returns fake transaction data.
-
-    Args:
-        query: SQL query string (not actually executed)
-
-    Returns:
-        JSON string with mock transaction data
-    """
-    # Mock transaction data
-    mock_data = [
-        {
-            "TransactionID": 12345,
-            "TransactionDate": "2026-01-01",
-            "Amount": -45.50,
-            "Currency": "CZK",
-            "Comment": "Grocery Store",
-            "TransactionType": "Card Payment",
-        },
-        {
-            "TransactionID": 12346,
-            "TransactionDate": "2025-12-30",
-            "Amount": -120.00,
-            "Currency": "CZK",
-            "Comment": "Online Shopping",
-            "TransactionType": "Card Payment",
-        },
-        {
-            "TransactionID": 12347,
-            "TransactionDate": "2025-12-28",
-            "Amount": 5000.00,
-            "Currency": "CZK",
-            "Comment": "Salary",
-            "TransactionType": "Incoming Transfer",
-        },
-    ]
-
-    return json.dumps(mock_data, indent=2)
 
 
 # Define tool schema for OpenAI function calling
@@ -84,7 +44,7 @@ def main():
     )
 
     print("=" * 60)
-    print("fin_chatbot - SQL Assistant with Tool Calling")
+    print("fin_chatbot - SQL Assistant (Azure SQL)")
     print("=" * 60)
     print("Ask questions about your transactions!")
     print("Type 'quit' or 'exit' to end the conversation")
@@ -92,11 +52,28 @@ def main():
     print("=" * 60)
     print()
 
-    # Initialize conversation history with system message
+    # Get database schema for LLM context
+    print("Loading database schema...")
+    try:
+        schema_info = db.get_table_schema()
+        print("Schema loaded successfully.\n")
+    except Exception as e:
+        print(f"Warning: Could not load schema: {e}\n")
+        schema_info = "Schema information unavailable"
+
+    # Initialize conversation history with system message including schema
+    system_prompt = f"""You are a helpful SQL assistant. You can query a finance database with transactions.
+
+Database Schema:
+{schema_info}
+
+When the user asks about transactions, use the execute_sql tool to query the database.
+Always write valid SQL queries based on the schema above."""
+
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful SQL assistant. You can query a finance database with transactions. When the user asks about transactions, use the execute_sql tool to query the database."
+            "content": system_prompt
         },
     ]
 
@@ -144,7 +121,7 @@ def main():
 
                         # Execute the function
                         if function_name == "execute_sql":
-                            function_response = execute_sql(
+                            function_response = db.execute_sql_query(
                                 query=function_args.get("query")
                             )
                         else:
