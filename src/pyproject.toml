@@ -1,0 +1,15 @@
+[project]
+name = "fin-chatbot"
+version = "0.1.0"
+description = "Natural Language to SQL chatbot for finance data"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.66.3",
+    "python-dotenv",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest",
+    "ruff",
+]

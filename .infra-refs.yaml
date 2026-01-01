@@ -1,0 +1,40 @@
+# Central configuration for cross-repository infrastructure references
+# This file documents the dependencies on fin_az_core infrastructure
+
+# Core Infrastructure Repository: fin_az_core
+core_infra:
+  # Terraform Remote State Backend (where fin_az_core state is stored)
+  terraform_backend:
+    resource_group_name: "finazcore251027-rg"
+    storage_account_name: "finazcore251027sttf"
+    container_name: "terraform-state"
+    key: "terraform.tfstate"
+
+  # Shared resources consumed from fin_az_core
+  resources:
+    # Container Registry for Docker images
+    acr_name: "finazcore251027acr"
+
+    # Key Vault for secrets
+    key_vault_name: "kv-finazcore251027-dev"
+
+    # Storage Account
+    storage_account_name: "safinazcore251027dev"
+
+    # SQL Database
+    sql_server_name: "sqlsrv-finazcore251027-dev-neu"
+    sql_database_name: "sqldb-finazcore251027-dev"
+
+    # Azure OpenAI
+    openai_account_name: "aoai-finazcore251027-dev"
+    openai_deployment_name: "gpt-4o-mini"
+
+    # Shared Managed Identity (for runtime)
+    app_identity_name: "aca-finazcore251027dev-identity"
+
+# Key Vault Secrets used by this service
+secrets:
+  - name: "openai-api-key"
+    description: "Azure OpenAI API key"
+  - name: "sql-app-password"
+    description: "SQL app_user password for database access"
