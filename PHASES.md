@@ -83,11 +83,36 @@ cd src && uv run python main.py
 
 ---
 
-## Upcoming Phases
+### Phase 3: Tool Calling (Function Calling) ✅
+**Tag**: `phase-03-tool-calling`
+**Date**: 2026-01-01
+**Key Concepts**:
+- Function calling / tool use
+- Tool schema definition (JSON Schema)
+- Tool call detection
+- Execution loop (call → execute → return → respond)
+- Mock data simulation
 
-### Phase 3: Tool Calling (Function Calling)
-**Tag**: `phase-03-tool-calling` (pending)
-**Key Concepts**: Function calling, tool schemas, execution loops
+**Key Files**:
+- `src/main.py` - Tool calling implementation with execute_sql
+
+**What You'll Learn**:
+- Defining tools with JSON Schema format
+- Detecting when LLM wants to call a function
+- Executing functions and parsing arguments
+- Multi-step conversation: user → tool call → tool result → final response
+- Message roles including "tool" role
+
+**Test Command**:
+```bash
+cd src && uv run python main.py
+# Try: "What transactions do I have?"
+# Try: "Show me my recent purchases"
+```
+
+---
+
+## Upcoming Phases
 
 ### Phase 4: Database Connection - Azure SQL
 **Tag**: `phase-04-azure-sql` (pending)
