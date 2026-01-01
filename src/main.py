@@ -1,7 +1,7 @@
 """
 fin_chatbot - Natural Language to SQL Chatbot
 
-Phase 1: Basic Azure OpenAI connection with interactive terminal chat
+Phase 2: Chat history and context management
 """
 
 from openai import AzureOpenAI
@@ -20,12 +20,17 @@ def main():
     )
 
     print("=" * 60)
-    print("fin_chatbot - Interactive Chat")
+    print("fin_chatbot - Interactive Chat with History")
     print("=" * 60)
     print("Type 'quit' or 'exit' to end the conversation")
     print("Press Ctrl+C to interrupt")
     print("=" * 60)
     print()
+
+    # Initialize conversation history with system message
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant."},
+    ]
 
     # Interactive chat loop
     try:
@@ -42,20 +47,28 @@ def main():
             if not user_input:
                 continue
 
-            # Send message to Azure OpenAI
+            # Add user message to history
+            messages.append({"role": "user", "content": user_input})
+
+            # Send full conversation history to Azure OpenAI
             try:
                 response = client.chat.completions.create(
                     model=os.environ["AZURE_OPENAI_DEPLOYMENT"],
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant."},
-                        {"role": "user", "content": user_input},
-                    ],
+                    messages=messages,
                 )
 
+                # Get assistant's response
+                assistant_message = response.choices[0].message.content
+
+                # Add assistant's response to history
+                messages.append({"role": "assistant", "content": assistant_message})
+
                 # Display response
-                print(f"\nAssistant: {response.choices[0].message.content}\n")
+                print(f"\nAssistant: {assistant_message}\n")
 
             except Exception as e:
+                # Remove last user message if there was an error
+                messages.pop()
                 print(f"\nError: {e}\n")
 
     except KeyboardInterrupt:
