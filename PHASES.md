@@ -112,11 +112,41 @@ cd src && uv run python main.py
 
 ---
 
-## Upcoming Phases
+### Phase 4: Database Connection - Azure SQL ✅
+**Tag**: `phase-04-azure-sql`
+**Date**: 2026-01-01
+**Key Concepts**:
+- Azure SQL Database connection with pyodbc
+- Schema discovery and introspection
+- Safe SQL query execution (SELECT only)
+- JSON result formatting
+- Credential management via Key Vault
 
-### Phase 4: Database Connection - Azure SQL
-**Tag**: `phase-04-azure-sql` (pending)
-**Key Concepts**: Database connections, schema discovery, real queries
+**Key Files**:
+- `src/db.py` - Database operations module (NEW)
+- `src/main.py` - Updated to use real database
+- `src/.env.example` - Added SQL credentials template
+- `src/pyproject.toml` - Added pyodbc dependency
+
+**What You'll Learn**:
+- Connecting to Azure SQL with ODBC
+- Querying database schema (INFORMATION_SCHEMA)
+- Executing parameterized queries safely
+- Handling database errors gracefully
+- Converting query results to JSON
+- Injecting schema context into LLM prompts
+
+**Test Command**:
+```bash
+cd src && uv run python main.py
+# Try: "What are my recent transactions?"
+# Try: "Show me all transactions from last week"
+# Try: "What's my biggest expense?"
+```
+
+---
+
+## Upcoming Phases
 
 ### Phase 5: ReAct Agent Pattern
 **Tag**: `phase-05-react-agent` (pending)
