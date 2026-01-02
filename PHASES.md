@@ -146,11 +146,43 @@ cd src && uv run python main.py
 
 ---
 
-## Upcoming Phases
+### Phase 5: ReAct Agent Pattern ✅
+**Tag**: `phase-05-react-agent`
+**Date**: 2026-01-01
+**Key Concepts**:
+- ReAct pattern (Reason-Act-Observe)
+- Explicit reasoning instructions
+- Iterative query refinement
+- Error recovery through prompting
+- Breaking complex questions into steps
 
-### Phase 5: ReAct Agent Pattern
-**Tag**: `phase-05-react-agent` (pending)
-**Key Concepts**: Reason-Act-Observe cycle, agent loops
+**Key Files**:
+- `src/main.py` - Updated system prompt with ReAct instructions
+
+**What You'll Learn**:
+- How prompting technique affects agent behavior
+- The ReAct cycle: THINK → ACT → OBSERVE → RESPOND
+- Encouraging LLMs to reason explicitly
+- Using existing infrastructure with better prompts
+- Difference between structural vs. prompting improvements
+
+**Implementation Notes**:
+- Primary change is the system prompt (prompting technique)
+- Leverages existing tool calling loop from Phase 3-4
+- No new code infrastructure needed
+- ReAct is fundamentally about **how** you prompt the model
+
+**Test Command**:
+```bash
+cd src && uv run python main.py
+# Try: "What's the total of my expenses last month?"
+# Try: "Which merchant did I spend the most at?"
+# Observe how the agent reasons through queries
+```
+
+---
+
+## Upcoming Phases
 
 ### Phase 6: Schema-Aware Production Agent
 **Tag**: `phase-06-production-agent` (pending)
