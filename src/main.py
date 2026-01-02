@@ -122,16 +122,19 @@ Important guidelines:
 
             # Execute agent
             try:
-                # Stream the agent's response
+                # Use invoke for simpler response handling
+                result = agent_graph.invoke({"messages": messages})
+
+                # Extract the final AI message from the result
                 response_content = None
-                for chunk in agent_graph.stream({"messages": messages}, stream_mode="updates"):
-                    # Get the latest message from the agent
-                    if "agent" in chunk:
-                        agent_messages = chunk["agent"].get("messages", [])
-                        if agent_messages:
-                            last_message = agent_messages[-1]
-                            if hasattr(last_message, "content"):
-                                response_content = last_message.content
+                if "messages" in result:
+                    # Get the last AI message
+                    for msg in reversed(result["messages"]):
+                        if hasattr(msg, "content") and hasattr(msg, "type") and msg.type == "ai":
+                            # Skip tool call messages (they have tool_calls but empty content)
+                            if msg.content:
+                                response_content = msg.content
+                                break
 
                 if response_content:
                     # Display response
