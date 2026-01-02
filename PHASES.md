@@ -262,11 +262,70 @@ cd src && uv run python main.py
 
 ---
 
-## Upcoming Phases
+### Phase 8: LangGraph Basics ✅
+**Tag**: `phase-08-langgraph-basics`
+**Date**: 2026-01-02
+**Key Concepts**:
+- StateGraph construction
+- TypedDict state definition
+- Node functions (agent, tools)
+- Conditional routing (should_continue)
+- add_messages reducer
+- Explicit graph compilation
 
-### Phase 8: LangGraph Basics
-**Tag**: `phase-08-langgraph-basics` (pending)
-**Key Concepts**: State management, graph execution
+**Key Files**:
+- `src/main.py` - Complete refactor to explicit LangGraph StateGraph
+- `src/pyproject.toml` - Added langgraph dependency
+
+**What You'll Learn**:
+- Defining state with `TypedDict` and `Annotated`
+- Using `add_messages` reducer for message history
+- Creating node functions that modify state
+- Building graphs with `StateGraph`, `add_node`, `add_edge`
+- Conditional routing with `add_conditional_edges`
+- Graph compilation with `graph.compile()`
+
+**Implementation Details**:
+- `AgentState(TypedDict)` - State container with messages
+- `call_model` node - Invokes LLM with tools bound
+- `execute_tools` node - Runs tool calls from LLM
+- `should_continue` - Routes to tools or end
+- Graph flow: START → agent → (tools → agent)* → END
+
+**Graph Structure**:
+```
+     ┌──────────────┐
+     │    START     │
+     └──────┬───────┘
+            │
+            ▼
+     ┌──────────────┐
+     │    agent     │◄──────┐
+     └──────┬───────┘       │
+            │               │
+      ┌─────┴─────┐         │
+      │ tool_calls?│         │
+      └─────┬─────┘         │
+       yes/ \no             │
+          /   \             │
+         ▼     ▼            │
+   ┌──────┐  ┌─────┐        │
+   │tools │  │ END │        │
+   └──┬───┘  └─────┘        │
+      │                     │
+      └─────────────────────┘
+```
+
+**Test Command**:
+```bash
+cd src && uv run python main.py
+# Same functionality as Phase 7, now with explicit StateGraph
+# Try: "What transactions do I have?"
+```
+
+---
+
+## Upcoming Phases
 
 ### Phase 9: LangGraph SQL Agent
 **Tag**: `phase-09-langgraph-agent` (pending)

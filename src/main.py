@@ -1,17 +1,33 @@
 """
 fin_chatbot - Natural Language to SQL Chatbot
 
-Phase 7: LangChain Introduction - Refactored to use LangChain framework
+Phase 8: LangGraph Basics - Explicit state graph with nodes, edges, and conditional routing
 """
 
+from typing import Annotated, Literal
+from typing_extensions import TypedDict
+
 from langchain_openai import AzureChatOpenAI
-from langchain.agents import create_agent
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, BaseMessage
 from langchain_core.tools import tool
+from langgraph.graph import StateGraph, START, END
+from langgraph.graph.message import add_messages
 from dotenv import load_dotenv
 import os
+import json
 import db
 
 load_dotenv()
+
+
+# Define the agent state using TypedDict
+class AgentState(TypedDict):
+    """State that flows through the graph nodes.
+
+    messages: Conversation history with add_messages reducer
+    """
+
+    messages: Annotated[list[BaseMessage], add_messages]
 
 
 @tool
@@ -27,11 +43,100 @@ def execute_sql(query: str) -> str:
     return db.execute_sql_query(query)
 
 
+# Tool mapping for execution
+TOOLS = {"execute_sql": execute_sql}
+
+
+def create_agent_graph(llm: AzureChatOpenAI, system_prompt: str):
+    """Create a LangGraph agent with explicit nodes and edges.
+
+    This demonstrates:
+    - StateGraph construction
+    - Node functions
+    - Conditional routing
+    - Tool execution flow
+    """
+    # Bind tools to the LLM
+    llm_with_tools = llm.bind_tools([execute_sql])
+
+    # Node: Call the LLM
+    def call_model(state: AgentState) -> dict:
+        """Node that calls the LLM with current messages."""
+        messages = state["messages"]
+
+        # Add system prompt as first message if not present
+        if not messages or not hasattr(messages[0], "content") or "SQL agent" not in str(messages[0].content):
+            from langchain_core.messages import SystemMessage
+
+            messages = [SystemMessage(content=system_prompt)] + list(messages)
+
+        response = llm_with_tools.invoke(messages)
+        return {"messages": [response]}
+
+    # Node: Execute tools
+    def execute_tools(state: AgentState) -> dict:
+        """Node that executes tool calls from the LLM response."""
+        messages = state["messages"]
+        last_message = messages[-1]
+
+        tool_results = []
+        for tool_call in last_message.tool_calls:
+            tool_name = tool_call["name"]
+            tool_args = tool_call["args"]
+
+            # Execute the tool
+            if tool_name in TOOLS:
+                result = TOOLS[tool_name].invoke(tool_args)
+            else:
+                result = json.dumps({"error": f"Unknown tool: {tool_name}"})
+
+            tool_results.append(
+                ToolMessage(content=result, tool_call_id=tool_call["id"])
+            )
+
+        return {"messages": tool_results}
+
+    # Conditional edge: Should we continue to tools or end?
+    def should_continue(state: AgentState) -> Literal["tools", "end"]:
+        """Determine if we should execute tools or finish."""
+        messages = state["messages"]
+        last_message = messages[-1]
+
+        # If LLM made tool calls, execute them
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+            return "tools"
+
+        # Otherwise, we're done
+        return "end"
+
+    # Build the graph
+    graph = StateGraph(AgentState)
+
+    # Add nodes
+    graph.add_node("agent", call_model)
+    graph.add_node("tools", execute_tools)
+
+    # Add edges
+    graph.add_edge(START, "agent")  # Start with agent
+    graph.add_conditional_edges(
+        "agent",
+        should_continue,
+        {
+            "tools": "tools",  # If tools needed, go to tools node
+            "end": END,  # If no tools, end
+        },
+    )
+    graph.add_edge("tools", "agent")  # After tools, back to agent
+
+    # Compile and return
+    return graph.compile()
+
+
 def main():
     print("=" * 60)
-    print("fin_chatbot - LangChain SQL Agent")
+    print("fin_chatbot - LangGraph SQL Agent")
     print("=" * 60)
-    print("Powered by LangChain framework")
+    print("Powered by LangGraph state machine")
     print("Ask questions about your transactions!")
     print("Type 'quit' or 'exit' to end the conversation")
     print("Press Ctrl+C to interrupt")
@@ -69,18 +174,18 @@ def main():
     )
 
     # System prompt for the agent
-    system_prompt = f"""You are a production-grade SQL agent that helps users query a finance database using the ReAct pattern.
+    system_prompt = f"""You are a production-grade SQL agent that helps users query a finance database.
 
 Database Schema:
 {schema_info}
 
 {sample_data_info}
 
-When answering questions, follow the ReAct cycle:
-1. THINK: Reason about what SQL query would answer the user's question
-2. ACT: Generate and execute the SQL query using the execute_sql tool
-3. OBSERVE: Analyze the results from the database
-4. RESPOND: Provide a clear, natural language answer to the user
+When answering questions, follow this pattern:
+1. Understand the user's question
+2. Generate an appropriate SQL query using the execute_sql tool
+3. Analyze the results from the database
+4. Provide a clear, natural language answer to the user
 
 Important guidelines:
 - Always validate your SQL syntax before executing
@@ -92,17 +197,32 @@ Important guidelines:
 - Break down complex questions into simpler queries if needed
 - Explain your reasoning when helpful"""
 
-    # Create agent with tools using LangChain's create_agent
-    tools_list = [execute_sql]
-    agent_graph = create_agent(
-        model=llm,
-        tools=tools_list,
-        system_prompt=system_prompt,
-        debug=False,
-    )
+    # Create the agent graph
+    agent_graph = create_agent_graph(llm, system_prompt)
+
+    # Display the graph structure
+    print("Agent Graph Structure:")
+    print("-" * 40)
+    print("  START")
+    print("    │")
+    print("    ▼")
+    print("  ┌───────┐")
+    print("  │ agent │◄─────┐")
+    print("  └───┬───┘      │")
+    print("      │          │")
+    print("   tools?        │")
+    print("    / \\         │")
+    print("  yes  no        │")
+    print("   │    │        │")
+    print("   ▼    ▼        │")
+    print("┌─────┐ END      │")
+    print("│tools│──────────┘")
+    print("└─────┘")
+    print("-" * 40)
+    print()
 
     # Interactive chat loop
-    messages = []
+    messages: list[BaseMessage] = []
     try:
         while True:
             # Get user input
@@ -117,31 +237,25 @@ Important guidelines:
             if not user_input:
                 continue
 
-            # Add user message to messages
-            messages.append({"role": "user", "content": user_input})
+            # Add user message
+            messages.append(HumanMessage(content=user_input))
 
-            # Execute agent
+            # Execute agent graph
             try:
-                # Use invoke for simpler response handling
                 result = agent_graph.invoke({"messages": messages})
 
-                # Extract the final AI message from the result
+                # Extract the final AI message
                 response_content = None
                 if "messages" in result:
-                    # Get the last AI message
                     for msg in reversed(result["messages"]):
-                        if hasattr(msg, "content") and hasattr(msg, "type") and msg.type == "ai":
-                            # Skip tool call messages (they have tool_calls but empty content)
-                            if msg.content:
-                                response_content = msg.content
-                                break
+                        if isinstance(msg, AIMessage) and msg.content:
+                            response_content = msg.content
+                            break
 
                 if response_content:
-                    # Display response
                     print(f"\nAssistant: {response_content}\n")
-
-                    # Add assistant response to messages
-                    messages.append({"role": "assistant", "content": response_content})
+                    # Update messages with full conversation
+                    messages = list(result["messages"])
                 else:
                     print("\nAssistant: [No response generated]\n")
 

@@ -9,6 +9,7 @@ dependencies = [
     "pyodbc",
     "langchain>=0.3.0",
     "langchain-openai",
+    "langgraph",
 ]
 
 [tool.uv]

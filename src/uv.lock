@@ -131,6 +131,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "langchain" },
     { name = "langchain-openai" },
+    { name = "langgraph" },
     { name = "openai" },
     { name = "pyodbc" },
     { name = "python-dotenv" },
@@ -146,6 +147,7 @@ dev = [
 requires-dist = [
     { name = "langchain", specifier = ">=0.3.0" },
     { name = "langchain-openai" },
+    { name = "langgraph" },
     { name = "openai", specifier = ">=1.66.3" },
     { name = "pyodbc" },
     { name = "python-dotenv" },
