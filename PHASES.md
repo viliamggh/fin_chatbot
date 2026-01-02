@@ -182,11 +182,49 @@ cd src && uv run python main.py
 
 ---
 
-## Upcoming Phases
+### Phase 6: Schema-Aware Production Agent ✅
+**Tag**: `phase-06-production-agent`
+**Date**: 2026-01-01
+**Key Concepts**:
+- SQL query validation
+- Timeout handling
+- Retry logic with exponential backoff
+- Error logging and recovery
+- Sample data for context enrichment
+- Production-grade error handling
 
-### Phase 6: Schema-Aware Production Agent
-**Tag**: `phase-06-production-agent` (pending)
-**Key Concepts**: Query validation, error recovery, production patterns
+**Key Files**:
+- `src/db.py` - Enhanced with validation, timeouts, retry logic, sample data
+- `src/main.py` - Updated to use sample data in context
+
+**What You'll Learn**:
+- Production-grade database operations
+- Query validation before execution (SELECT-only enforcement)
+- Timeout configuration and handling
+- Exponential backoff retry patterns
+- Comprehensive error logging
+- Enriching LLM context with sample data
+- Transient error detection and recovery
+
+**Implementation Details**:
+- `validate_sql_query()` - Checks for SELECT queries, blocks dangerous keywords
+- 30-second query timeout (configurable)
+- Up to 3 retry attempts with exponential backoff (1s, 2s, 4s)
+- Python logging for all database operations
+- `get_sample_data()` - Retrieves sample rows for context
+- Enhanced error messages with attempt count
+
+**Test Command**:
+```bash
+cd src && uv run python main.py
+# The agent now has sample data in context for better queries
+# Try: "What transactions do I have?"
+# Observe: Schema + sample data loaded at startup
+```
+
+---
+
+## Upcoming Phases
 
 ### Phase 7: LangChain Introduction
 **Tag**: `phase-07-langchain` (pending)
