@@ -1,15 +1,14 @@
 """
 fin_chatbot - Natural Language to SQL Chatbot
 
-Phase 8: LangGraph Basics - Explicit state graph with nodes, edges, and conditional routing
+Phase 9: LangGraph SQL Agent - Specialized nodes for SQL workflow
 """
 
 from typing import Annotated, Literal
 from typing_extensions import TypedDict
 
 from langchain_openai import AzureChatOpenAI
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, BaseMessage
-from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from dotenv import load_dotenv
@@ -20,113 +19,201 @@ import db
 load_dotenv()
 
 
-# Define the agent state using TypedDict
+# Define the agent state with SQL-specific fields
 class AgentState(TypedDict):
-    """State that flows through the graph nodes.
+    """State that flows through the SQL agent graph.
 
     messages: Conversation history with add_messages reducer
+    user_question: Current user question being processed
+    sql_query: Generated SQL query
+    results: Query execution results (JSON string)
+    error: Error message if any step fails
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
+    user_question: str
+    sql_query: str | None
+    results: str | None
+    error: str | None
 
 
-@tool
-def execute_sql(query: str) -> str:
-    """Execute SQL query on the finance database to retrieve transaction data.
-
-    Args:
-        query: The SQL query to execute
-
-    Returns:
-        JSON string with query results or error message
-    """
-    return db.execute_sql_query(query)
-
-
-# Tool mapping for execution
-TOOLS = {"execute_sql": execute_sql}
-
-
-def create_agent_graph(llm: AzureChatOpenAI, system_prompt: str):
-    """Create a LangGraph agent with explicit nodes and edges.
+def create_sql_agent_graph(llm: AzureChatOpenAI, schema_info: str, sample_data_info: str):
+    """Create a LangGraph SQL agent with specialized nodes.
 
     This demonstrates:
-    - StateGraph construction
-    - Node functions
-    - Conditional routing
-    - Tool execution flow
+    - Specialized nodes for each step of SQL workflow
+    - State persistence across nodes
+    - Error handling and conditional routing
+    - Separation of concerns
     """
-    # Bind tools to the LLM
-    llm_with_tools = llm.bind_tools([execute_sql])
 
-    # Node: Call the LLM
-    def call_model(state: AgentState) -> dict:
-        """Node that calls the LLM with current messages."""
+    # Node 1: Analyze user question
+    def analyze(state: AgentState) -> dict:
+        """Analyze the user question and extract intent."""
         messages = state["messages"]
+        user_question = messages[-1].content if messages else ""
 
-        # Add system prompt as first message if not present
-        if not messages or not hasattr(messages[0], "content") or "SQL agent" not in str(messages[0].content):
-            from langchain_core.messages import SystemMessage
+        return {
+            "user_question": user_question,
+            "sql_query": None,
+            "results": None,
+            "error": None,
+        }
 
-            messages = [SystemMessage(content=system_prompt)] + list(messages)
+    # Node 2: Generate SQL query
+    def generate_sql(state: AgentState) -> dict:
+        """Generate SQL query based on user question."""
+        user_question = state["user_question"]
 
-        response = llm_with_tools.invoke(messages)
-        return {"messages": [response]}
+        system_prompt = f"""You are a SQL query generator for a finance database.
 
-    # Node: Execute tools
-    def execute_tools(state: AgentState) -> dict:
-        """Node that executes tool calls from the LLM response."""
-        messages = state["messages"]
-        last_message = messages[-1]
+Database Schema:
+{schema_info}
 
-        tool_results = []
-        for tool_call in last_message.tool_calls:
-            tool_name = tool_call["name"]
-            tool_args = tool_call["args"]
+{sample_data_info}
 
-            # Execute the tool
-            if tool_name in TOOLS:
-                result = TOOLS[tool_name].invoke(tool_args)
-            else:
-                result = json.dumps({"error": f"Unknown tool: {tool_name}"})
+Generate a SQL query to answer the user's question. Return ONLY the SQL query, nothing else.
 
-            tool_results.append(
-                ToolMessage(content=result, tool_call_id=tool_call["id"])
-            )
+Important:
+- Only generate SELECT queries
+- Use the schema and sample data above for accuracy
+- Ensure proper SQL syntax
+- Keep queries simple and efficient"""
 
-        return {"messages": tool_results}
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=f"Generate SQL query for: {user_question}"),
+        ]
 
-    # Conditional edge: Should we continue to tools or end?
-    def should_continue(state: AgentState) -> Literal["tools", "end"]:
-        """Determine if we should execute tools or finish."""
-        messages = state["messages"]
-        last_message = messages[-1]
+        try:
+            response = llm.invoke(messages)
+            sql_query = response.content.strip()
 
-        # If LLM made tool calls, execute them
-        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-            return "tools"
+            # Clean up markdown code blocks if present
+            if sql_query.startswith("```sql"):
+                sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
+            elif sql_query.startswith("```"):
+                sql_query = sql_query.replace("```", "").strip()
 
-        # Otherwise, we're done
+            return {"sql_query": sql_query, "error": None}
+
+        except Exception as e:
+            return {"sql_query": None, "error": f"SQL generation failed: {str(e)}"}
+
+    # Node 3: Execute SQL query
+    def execute(state: AgentState) -> dict:
+        """Execute the generated SQL query."""
+        sql_query = state["sql_query"]
+
+        if not sql_query:
+            return {"results": None, "error": "No SQL query to execute"}
+
+        try:
+            results = db.execute_sql_query(sql_query)
+
+            # Check if results contain an error
+            try:
+                results_json = json.loads(results)
+                if isinstance(results_json, dict) and "error" in results_json:
+                    return {
+                        "results": None,
+                        "error": f"Query execution failed: {results_json['error']}",
+                    }
+            except json.JSONDecodeError:
+                pass
+
+            return {"results": results, "error": None}
+
+        except Exception as e:
+            return {"results": None, "error": f"Execution error: {str(e)}"}
+
+    # Node 4: Respond with natural language
+    def respond(state: AgentState) -> dict:
+        """Format results into natural language response."""
+        user_question = state["user_question"]
+        sql_query = state["sql_query"]
+        results = state["results"]
+        error = state["error"]
+
+        # Handle error case
+        if error:
+            system_prompt = f"""You are a helpful assistant explaining why a database query failed.
+
+User asked: {user_question}
+Generated SQL: {sql_query or "None"}
+Error: {error}
+
+Explain the error in simple terms and suggest what might be wrong."""
+
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(
+                    content="Explain why this query failed and what could be done differently."
+                ),
+            ]
+
+        else:
+            # Success case
+            system_prompt = f"""You are a helpful assistant presenting database query results.
+
+User asked: {user_question}
+SQL query used: {sql_query}
+Results: {results}
+
+Provide a clear, natural language answer to the user's question based on these results."""
+
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content="Summarize the results for the user."),
+            ]
+
+        try:
+            response = llm.invoke(messages)
+            return {"messages": [AIMessage(content=response.content)]}
+
+        except Exception as e:
+            return {
+                "messages": [
+                    AIMessage(content=f"Sorry, I encountered an error: {str(e)}")
+                ]
+            }
+
+    # Routing functions
+    def should_generate_sql(state: AgentState) -> Literal["generate_sql", "end"]:
+        """Route from analyze to generate_sql or end."""
+        if state.get("user_question"):
+            return "generate_sql"
         return "end"
+
+    def should_execute(state: AgentState) -> Literal["execute", "respond"]:
+        """Route from generate_sql to execute or respond (on error)."""
+        if state.get("sql_query") and not state.get("error"):
+            return "execute"
+        return "respond"
+
+    def should_respond(_state: AgentState) -> Literal["respond"]:
+        """Always route to respond after execute."""
+        return "respond"
 
     # Build the graph
     graph = StateGraph(AgentState)
 
     # Add nodes
-    graph.add_node("agent", call_model)
-    graph.add_node("tools", execute_tools)
+    graph.add_node("analyze", analyze)
+    graph.add_node("generate_sql", generate_sql)
+    graph.add_node("execute", execute)
+    graph.add_node("respond", respond)
 
     # Add edges
-    graph.add_edge(START, "agent")  # Start with agent
+    graph.add_edge(START, "analyze")
     graph.add_conditional_edges(
-        "agent",
-        should_continue,
-        {
-            "tools": "tools",  # If tools needed, go to tools node
-            "end": END,  # If no tools, end
-        },
+        "analyze", should_generate_sql, {"generate_sql": "generate_sql", "end": END}
     )
-    graph.add_edge("tools", "agent")  # After tools, back to agent
+    graph.add_conditional_edges(
+        "generate_sql", should_execute, {"execute": "execute", "respond": "respond"}
+    )
+    graph.add_conditional_edges("execute", should_respond, {"respond": "respond"})
+    graph.add_edge("respond", END)
 
     # Compile and return
     return graph.compile()
@@ -134,9 +221,9 @@ def create_agent_graph(llm: AzureChatOpenAI, system_prompt: str):
 
 def main():
     print("=" * 60)
-    print("fin_chatbot - LangGraph SQL Agent")
+    print("fin_chatbot - LangGraph SQL Agent (Phase 9)")
     print("=" * 60)
-    print("Powered by LangGraph state machine")
+    print("Powered by specialized SQL workflow nodes")
     print("Ask questions about your transactions!")
     print("Type 'quit' or 'exit' to end the conversation")
     print("Press Ctrl+C to interrupt")
@@ -173,51 +260,37 @@ def main():
         temperature=0,
     )
 
-    # System prompt for the agent
-    system_prompt = f"""You are a production-grade SQL agent that helps users query a finance database.
-
-Database Schema:
-{schema_info}
-
-{sample_data_info}
-
-When answering questions, follow this pattern:
-1. Understand the user's question
-2. Generate an appropriate SQL query using the execute_sql tool
-3. Analyze the results from the database
-4. Provide a clear, natural language answer to the user
-
-Important guidelines:
-- Always validate your SQL syntax before executing
-- Use the schema and sample data above to write accurate queries
-- Only SELECT queries are allowed (no INSERT, UPDATE, DELETE, DROP, etc.)
-- Queries have a 30-second timeout
-- Failed queries will be automatically retried up to 3 times
-- If a query fails or returns unexpected results, refine your approach
-- Break down complex questions into simpler queries if needed
-- Explain your reasoning when helpful"""
-
-    # Create the agent graph
-    agent_graph = create_agent_graph(llm, system_prompt)
+    # Create the SQL agent graph
+    agent_graph = create_sql_agent_graph(llm, schema_info, sample_data_info)
 
     # Display the graph structure
-    print("Agent Graph Structure:")
+    print("SQL Agent Graph Structure:")
     print("-" * 40)
     print("  START")
     print("    │")
     print("    ▼")
-    print("  ┌───────┐")
-    print("  │ agent │◄─────┐")
-    print("  └───┬───┘      │")
-    print("      │          │")
-    print("   tools?        │")
-    print("    / \\         │")
-    print("  yes  no        │")
-    print("   │    │        │")
-    print("   ▼    ▼        │")
-    print("┌─────┐ END      │")
-    print("│tools│──────────┘")
-    print("└─────┘")
+    print("  ┌─────────┐")
+    print("  │ analyze │")
+    print("  └────┬────┘")
+    print("       │")
+    print("       ▼")
+    print("  ┌──────────────┐")
+    print("  │ generate_sql │")
+    print("  └───────┬──────┘")
+    print("      error│  ok")
+    print("        ┌──┴───┐")
+    print("        ▼      ▼")
+    print("    ┌────────┐ ┌─────────┐")
+    print("    │respond │ │ execute │")
+    print("    └────┬───┘ └────┬────┘")
+    print("         │          │")
+    print("         │          ▼")
+    print("         │     ┌────────┐")
+    print("         └────►│respond │")
+    print("               └───┬────┘")
+    print("                   │")
+    print("                   ▼")
+    print("                  END")
     print("-" * 40)
     print()
 
@@ -242,7 +315,15 @@ Important guidelines:
 
             # Execute agent graph
             try:
-                result = agent_graph.invoke({"messages": messages})
+                result = agent_graph.invoke(
+                    {
+                        "messages": messages,
+                        "user_question": "",
+                        "sql_query": None,
+                        "results": None,
+                        "error": None,
+                    }
+                )
 
                 # Extract the final AI message
                 response_content = None
@@ -258,6 +339,10 @@ Important guidelines:
                     messages = list(result["messages"])
                 else:
                     print("\nAssistant: [No response generated]\n")
+
+                # Debug: Show SQL query if available
+                if result.get("sql_query"):
+                    print(f"[SQL Query]: {result['sql_query']}\n")
 
             except Exception as e:
                 # Remove last user message on error

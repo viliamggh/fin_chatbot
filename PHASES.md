@@ -325,11 +325,74 @@ cd src && uv run python main.py
 
 ---
 
-## Upcoming Phases
+### Phase 9: LangGraph SQL Agent ✅
+**Tag**: `phase-09-langgraph-agent`
+**Date**: 2026-01-02
+**Key Concepts**:
+- Specialized nodes for SQL workflow
+- Enhanced state with SQL-specific fields
+- Conditional routing with error handling
+- Separation of concerns (analyze → generate → execute → respond)
+- Debug output for SQL queries
 
-### Phase 9: LangGraph SQL Agent
-**Tag**: `phase-09-langgraph-agent` (pending)
-**Key Concepts**: Full SQL agent, node structure, routing
+**Key Files**:
+- `src/main.py` - Refactored with 4 specialized nodes
+
+**What You'll Learn**:
+- Designing multi-node workflows for specific tasks
+- State enrichment with domain-specific fields (sql_query, results, error)
+- Error routing (SQL generation failures skip execution)
+- Using LLM for both generation and response formatting
+- Debugging workflows with intermediate output
+
+**Implementation Details**:
+- `AgentState` - Extended with: user_question, sql_query, results, error
+- `analyze` node - Extracts user question from messages
+- `generate_sql` node - LLM generates SQL query, cleans markdown
+- `execute` node - Runs query via db.execute_sql_query()
+- `respond` node - Formats results or errors into natural language
+- Conditional routing: generate_sql can skip execute on error
+- Debug output shows SQL query being executed
+
+**Graph Structure**:
+```
+  START
+    │
+    ▼
+  ┌─────────┐
+  │ analyze │
+  └────┬────┘
+       │
+       ▼
+  ┌──────────────┐
+  │ generate_sql │
+  └───────┬──────┘
+      error│  ok
+        ┌──┴───┐
+        ▼      ▼
+    ┌────────┐ ┌─────────┐
+    │respond │ │ execute │
+    └────┬───┘ └────┬────┘
+         │          │
+         │          ▼
+         │     ┌────────┐
+         └────►│respond │
+               └───┬────┘
+                   │
+                   ▼
+                  END
+```
+
+**Test Command**:
+```bash
+cd src && uv run python main.py
+# Try: "What transactions do I have?"
+# Observe SQL query debug output
+```
+
+---
+
+## Upcoming Phases
 
 ### Phase 10: Multi-Agent System
 **Tag**: `phase-10-multi-agent` (pending)
