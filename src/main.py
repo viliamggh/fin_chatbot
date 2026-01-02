@@ -1,7 +1,7 @@
 """
 fin_chatbot - Natural Language to SQL Chatbot
 
-Phase 4: Real Azure SQL Database connection and queries
+Phase 5: ReAct Agent Pattern (Reason-Act-Observe cycle)
 """
 
 from openai import AzureOpenAI
@@ -44,9 +44,10 @@ def main():
     )
 
     print("=" * 60)
-    print("fin_chatbot - SQL Assistant (Azure SQL)")
+    print("fin_chatbot - ReAct SQL Agent")
     print("=" * 60)
     print("Ask questions about your transactions!")
+    print("The agent will reason through queries step by step.")
     print("Type 'quit' or 'exit' to end the conversation")
     print("Press Ctrl+C to interrupt")
     print("=" * 60)
@@ -62,13 +63,23 @@ def main():
         schema_info = "Schema information unavailable"
 
     # Initialize conversation history with system message including schema
-    system_prompt = f"""You are a helpful SQL assistant. You can query a finance database with transactions.
+    system_prompt = f"""You are a SQL agent that helps users query a finance database using the ReAct pattern.
 
 Database Schema:
 {schema_info}
 
-When the user asks about transactions, use the execute_sql tool to query the database.
-Always write valid SQL queries based on the schema above."""
+When answering questions, follow the ReAct cycle:
+1. THINK: Reason about what SQL query would answer the user's question
+2. ACT: Generate and execute the SQL query using the execute_sql tool
+3. OBSERVE: Analyze the results from the database
+4. RESPOND: Provide a clear, natural language answer to the user
+
+Important guidelines:
+- Always validate your SQL syntax before executing
+- Use the schema above to write accurate queries
+- If a query fails or returns unexpected results, refine your approach
+- Break down complex questions into simpler queries if needed
+- Explain your reasoning when helpful"""
 
     messages = [
         {
