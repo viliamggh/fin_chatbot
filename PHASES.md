@@ -224,11 +224,45 @@ cd src && uv run python main.py
 
 ---
 
-## Upcoming Phases
+### Phase 7: LangChain Introduction ✅
+**Tag**: `phase-07-langchain`
+**Date**: 2026-01-02
+**Key Concepts**:
+- LangChain framework abstraction
+- Tool decorator pattern
+- Agent creation API (LangChain 1.x)
+- LangGraph compiled state graphs
+- Streaming agent responses
 
-### Phase 7: LangChain Introduction
-**Tag**: `phase-07-langchain` (pending)
-**Key Concepts**: LangChain framework, custom tools
+**Key Files**:
+- `src/main.py` - Complete refactor to use LangChain
+- `src/pyproject.toml` - Added LangChain dependencies
+
+**What You'll Learn**:
+- Using LangChain's `AzureChatOpenAI` wrapper
+- Creating tools with `@tool` decorator
+- Using `create_agent()` API (new in LangChain 1.x)
+- Working with LangGraph's compiled state graphs
+- Streaming agent responses
+- Framework abstractions vs manual implementation
+
+**Implementation Details**:
+- Replaced raw OpenAI client with `AzureChatOpenAI`
+- Converted `execute_sql` function to LangChain tool
+- Used `create_agent()` instead of manual tool calling loop
+- Leveraged LangGraph for state management
+- All Phase 6 features preserved (validation, timeouts, retry)
+
+**Test Command**:
+```bash
+cd src && uv run python main.py
+# Same functionality as Phase 6, now using LangChain
+# Try: "What transactions do I have?"
+```
+
+---
+
+## Upcoming Phases
 
 ### Phase 8: LangGraph Basics
 **Tag**: `phase-08-langgraph-basics` (pending)
