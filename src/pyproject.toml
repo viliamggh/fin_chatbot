@@ -7,6 +7,8 @@ dependencies = [
     "openai>=1.66.3",
     "python-dotenv",
     "pyodbc",
+    "langchain>=0.3.0",
+    "langchain-openai",
 ]
 
 [tool.uv]

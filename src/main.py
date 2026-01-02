@@ -1,52 +1,37 @@
 """
 fin_chatbot - Natural Language to SQL Chatbot
 
-Phase 6: Schema-Aware Production Agent with validation, timeouts, and retry logic
+Phase 7: LangChain Introduction - Refactored to use LangChain framework
 """
 
-from openai import AzureOpenAI
+from langchain_openai import AzureChatOpenAI
+from langchain.agents import create_agent
+from langchain_core.tools import tool
 from dotenv import load_dotenv
 import os
-import json
 import db
 
 load_dotenv()
 
 
-# Define tool schema for OpenAI function calling
-tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "execute_sql",
-            "description": "Execute SQL query on the finance database to retrieve transaction data",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The SQL query to execute"
-                    }
-                },
-                "required": ["query"]
-            }
-        }
-    }
-]
+@tool
+def execute_sql(query: str) -> str:
+    """Execute SQL query on the finance database to retrieve transaction data.
+
+    Args:
+        query: The SQL query to execute
+
+    Returns:
+        JSON string with query results or error message
+    """
+    return db.execute_sql_query(query)
 
 
 def main():
-    # Initialize Azure OpenAI client
-    client = AzureOpenAI(
-        api_version="2024-02-01",
-        azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
-        api_key=os.environ["AZURE_OPENAI_API_KEY"],
-    )
-
     print("=" * 60)
-    print("fin_chatbot - Production SQL Agent")
+    print("fin_chatbot - LangChain SQL Agent")
     print("=" * 60)
-    print("Features: Query validation, timeouts, retry logic")
+    print("Powered by LangChain framework")
     print("Ask questions about your transactions!")
     print("Type 'quit' or 'exit' to end the conversation")
     print("Press Ctrl+C to interrupt")
@@ -74,7 +59,16 @@ def main():
         schema_info = "Schema information unavailable"
         sample_data_info = ""
 
-    # Initialize conversation history with system message including schema
+    # Initialize Azure OpenAI with LangChain
+    llm = AzureChatOpenAI(
+        azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+        azure_deployment=os.environ["AZURE_OPENAI_DEPLOYMENT"],
+        api_version="2024-02-01",
+        api_key=os.environ["AZURE_OPENAI_API_KEY"],
+        temperature=0,
+    )
+
+    # System prompt for the agent
     system_prompt = f"""You are a production-grade SQL agent that helps users query a finance database using the ReAct pattern.
 
 Database Schema:
@@ -98,14 +92,17 @@ Important guidelines:
 - Break down complex questions into simpler queries if needed
 - Explain your reasoning when helpful"""
 
-    messages = [
-        {
-            "role": "system",
-            "content": system_prompt
-        },
-    ]
+    # Create agent with tools using LangChain's create_agent
+    tools_list = [execute_sql]
+    agent_graph = create_agent(
+        model=llm,
+        tools=tools_list,
+        system_prompt=system_prompt,
+        debug=False,
+    )
 
     # Interactive chat loop
+    messages = []
     try:
         while True:
             # Get user input
@@ -120,70 +117,33 @@ Important guidelines:
             if not user_input:
                 continue
 
-            # Add user message to history
+            # Add user message to messages
             messages.append({"role": "user", "content": user_input})
 
-            # Send full conversation history to Azure OpenAI with tools
+            # Execute agent
             try:
-                response = client.chat.completions.create(
-                    model=os.environ["AZURE_OPENAI_DEPLOYMENT"],
-                    messages=messages,
-                    tools=tools,
-                )
+                # Stream the agent's response
+                response_content = None
+                for chunk in agent_graph.stream({"messages": messages}, stream_mode="updates"):
+                    # Get the latest message from the agent
+                    if "agent" in chunk:
+                        agent_messages = chunk["agent"].get("messages", [])
+                        if agent_messages:
+                            last_message = agent_messages[-1]
+                            if hasattr(last_message, "content"):
+                                response_content = last_message.content
 
-                response_message = response.choices[0].message
-                tool_calls = response_message.tool_calls
+                if response_content:
+                    # Display response
+                    print(f"\nAssistant: {response_content}\n")
 
-                # Check if the model wants to call a tool
-                if tool_calls:
-                    # Add assistant's tool call message to history
-                    messages.append(response_message)
-
-                    # Process each tool call
-                    for tool_call in tool_calls:
-                        function_name = tool_call.function.name
-                        function_args = json.loads(tool_call.function.arguments)
-
-                        print(f"\n[Tool Call] {function_name}")
-                        print(f"[Query] {function_args.get('query', 'N/A')}")
-
-                        # Execute the function
-                        if function_name == "execute_sql":
-                            function_response = db.execute_sql_query(
-                                query=function_args.get("query")
-                            )
-                        else:
-                            function_response = json.dumps({"error": "Unknown function"})
-
-                        # Add tool response to messages
-                        messages.append(
-                            {
-                                "tool_call_id": tool_call.id,
-                                "role": "tool",
-                                "name": function_name,
-                                "content": function_response,
-                            }
-                        )
-
-                    # Get final response from the model after tool execution
-                    second_response = client.chat.completions.create(
-                        model=os.environ["AZURE_OPENAI_DEPLOYMENT"],
-                        messages=messages,
-                    )
-
-                    assistant_message = second_response.choices[0].message.content
-                    messages.append({"role": "assistant", "content": assistant_message})
-
-                    print(f"\nAssistant: {assistant_message}\n")
-
+                    # Add assistant response to messages
+                    messages.append({"role": "assistant", "content": response_content})
                 else:
-                    # No tool call - regular response
-                    assistant_message = response_message.content
-                    messages.append({"role": "assistant", "content": assistant_message})
-                    print(f"\nAssistant: {assistant_message}\n")
+                    print("\nAssistant: [No response generated]\n")
 
             except Exception as e:
-                # Remove last user message if there was an error
+                # Remove last user message on error
                 messages.pop()
                 print(f"\nError: {e}\n")
 
