@@ -1,7 +1,7 @@
 """
 fin_chatbot - Natural Language to SQL Chatbot
 
-Phase 5: ReAct Agent Pattern (Reason-Act-Observe cycle)
+Phase 6: Schema-Aware Production Agent with validation, timeouts, and retry logic
 """
 
 from openai import AzureOpenAI
@@ -44,29 +44,43 @@ def main():
     )
 
     print("=" * 60)
-    print("fin_chatbot - ReAct SQL Agent")
+    print("fin_chatbot - Production SQL Agent")
     print("=" * 60)
+    print("Features: Query validation, timeouts, retry logic")
     print("Ask questions about your transactions!")
-    print("The agent will reason through queries step by step.")
     print("Type 'quit' or 'exit' to end the conversation")
     print("Press Ctrl+C to interrupt")
     print("=" * 60)
     print()
 
     # Get database schema for LLM context
-    print("Loading database schema...")
+    print("Loading database schema and sample data...")
     try:
         schema_info = db.get_table_schema()
-        print("Schema loaded successfully.\n")
+        print("✓ Schema loaded")
+
+        # Get sample data to enrich context
+        table_names = db.get_table_names()
+        sample_data_parts = []
+        for table_name in table_names:
+            sample_data = db.get_sample_data(table_name, limit=2)
+            sample_data_parts.append(sample_data)
+
+        sample_data_info = "\n".join(sample_data_parts)
+        print(f"✓ Sample data loaded from {len(table_names)} table(s)\n")
+
     except Exception as e:
-        print(f"Warning: Could not load schema: {e}\n")
+        print(f"Warning: Could not load schema/sample data: {e}\n")
         schema_info = "Schema information unavailable"
+        sample_data_info = ""
 
     # Initialize conversation history with system message including schema
-    system_prompt = f"""You are a SQL agent that helps users query a finance database using the ReAct pattern.
+    system_prompt = f"""You are a production-grade SQL agent that helps users query a finance database using the ReAct pattern.
 
 Database Schema:
 {schema_info}
+
+{sample_data_info}
 
 When answering questions, follow the ReAct cycle:
 1. THINK: Reason about what SQL query would answer the user's question
@@ -76,7 +90,10 @@ When answering questions, follow the ReAct cycle:
 
 Important guidelines:
 - Always validate your SQL syntax before executing
-- Use the schema above to write accurate queries
+- Use the schema and sample data above to write accurate queries
+- Only SELECT queries are allowed (no INSERT, UPDATE, DELETE, DROP, etc.)
+- Queries have a 30-second timeout
+- Failed queries will be automatically retried up to 3 times
 - If a query fails or returns unexpected results, refine your approach
 - Break down complex questions into simpler queries if needed
 - Explain your reasoning when helpful"""
