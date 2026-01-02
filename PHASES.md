@@ -392,11 +392,73 @@ cd src && uv run python main.py
 
 ---
 
-## Upcoming Phases
+### Phase 10: Multi-Agent System ✅
+**Tag**: `phase-10-multi-agent`
+**Date**: 2026-01-02
+**Key Concepts**:
+- Multi-agent orchestration with Supervisor
+- Specialized agents (SQL, Visualization, Response)
+- Intent-based routing
+- Chart generation with matplotlib
+- Agent handoffs and state sharing
 
-### Phase 10: Multi-Agent System
-**Tag**: `phase-10-multi-agent` (pending)
-**Key Concepts**: Agent orchestration, specialized agents
+**Key Files**:
+- `src/main.py` - Complete multi-agent system
+- `src/pyproject.toml` - Added matplotlib dependency
+
+**What You'll Learn**:
+- Designing supervisor/router patterns
+- Specialized agents with different system prompts
+- Intent analysis and dynamic routing
+- Generating visualizations from query results
+- Synthesizing responses from multiple agent outputs
+
+**Implementation Details**:
+- `MultiAgentState` - Extended state with viz fields (needs_viz, chart_type, chart_path)
+- **Supervisor** - Analyzes intent, returns JSON routing decision
+- **SQL Agent** - Generates queries with viz-aware hints
+- **Viz Agent** - Creates bar/line/pie charts with matplotlib
+- **Response Agent** - Synthesizes final response from all outputs
+- **Routing**:
+  - Supervisor → SQL Agent (if needs_sql)
+  - SQL Agent → Viz Agent (if needs_viz) or Response Agent
+  - Viz Agent → Response Agent
+  - Response Agent → END
+
+**Agent Architecture**:
+```
+           ┌────────────┐
+           │ SUPERVISOR │  (intent analysis)
+           └─────┬──────┘
+                 │
+           ┌─────▼──────┐
+           │ SQL_AGENT  │  (query generation)
+           └─────┬──────┘
+          needs_viz?
+           yes/  \no
+             /    \
+   ┌─────────▼┐    │
+   │VIZ_AGENT │    │  (chart generation)
+   └─────┬────┘    │
+         │         │
+         └────┬────┘
+              ▼
+      ┌──────────────┐
+      │RESPONSE_AGENT│  (synthesis)
+      └──────────────┘
+```
+
+**Test Command**:
+```bash
+cd src && uv run python main.py
+# Simple query: "What's my total spend?"
+# With chart: "Show my expenses by category"
+# Line chart: "How has spending changed by month?"
+```
+
+---
+
+## Upcoming Phases
 
 ### Phase 11: Deployment & GUI
 **Tag**: `phase-11-deployment` (pending)

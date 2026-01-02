@@ -1,7 +1,7 @@
 """
 fin_chatbot - Natural Language to SQL Chatbot
 
-Phase 9: LangGraph SQL Agent - Specialized nodes for SQL workflow
+Phase 10: Multi-Agent System - Supervisor + SQL Agent + Viz Agent + Response Agent
 """
 
 from typing import Annotated, Literal
@@ -12,219 +12,416 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, Base
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from dotenv import load_dotenv
+import matplotlib.pyplot as plt
+import matplotlib
 import os
 import json
 import db
 
+# Use non-interactive backend for matplotlib
+matplotlib.use("Agg")
+
 load_dotenv()
 
 
-# Define the agent state with SQL-specific fields
-class AgentState(TypedDict):
-    """State that flows through the SQL agent graph.
+# Multi-agent state definition
+class MultiAgentState(TypedDict):
+    """State shared across all agents in the multi-agent system.
 
-    messages: Conversation history with add_messages reducer
-    user_question: Current user question being processed
+    messages: Conversation history
+    user_question: Current user question
+    needs_sql: Whether SQL query is needed
+    needs_viz: Whether visualization is needed
     sql_query: Generated SQL query
-    results: Query execution results (JSON string)
-    error: Error message if any step fails
+    sql_results: Query results (JSON string)
+    chart_type: Type of chart to generate (bar, line, pie, etc.)
+    chart_path: Path to generated chart image
+    final_response: Synthesized response for user
+    error: Error message if any
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
     user_question: str
+    needs_sql: bool
+    needs_viz: bool
     sql_query: str | None
-    results: str | None
+    sql_results: str | None
+    chart_type: str | None
+    chart_path: str | None
+    final_response: str | None
     error: str | None
 
 
-def create_sql_agent_graph(llm: AzureChatOpenAI, schema_info: str, sample_data_info: str):
-    """Create a LangGraph SQL agent with specialized nodes.
+def create_multi_agent_system(llm: AzureChatOpenAI, schema_info: str, sample_data_info: str):
+    """Create a multi-agent system with Supervisor, SQL, Viz, and Response agents.
 
-    This demonstrates:
-    - Specialized nodes for each step of SQL workflow
-    - State persistence across nodes
-    - Error handling and conditional routing
-    - Separation of concerns
+    Architecture:
+    - Supervisor: Analyzes user intent, decides which agents to invoke
+    - SQL Agent: Generates and executes SQL queries
+    - Viz Agent: Creates visualizations with matplotlib
+    - Response Agent: Synthesizes final response
     """
 
-    # Node 1: Analyze user question
-    def analyze(state: AgentState) -> dict:
-        """Analyze the user question and extract intent."""
+    # =========================================================================
+    # SUPERVISOR AGENT - Routes to other agents
+    # =========================================================================
+    def supervisor(state: MultiAgentState) -> dict:
+        """Analyze user question and decide which agents to invoke."""
         messages = state["messages"]
         user_question = messages[-1].content if messages else ""
 
-        return {
-            "user_question": user_question,
-            "sql_query": None,
-            "results": None,
-            "error": None,
-        }
+        system_prompt = """You are a routing supervisor for a finance assistant.
+Analyze the user's question and decide what's needed.
 
-    # Node 2: Generate SQL query
-    def generate_sql(state: AgentState) -> dict:
-        """Generate SQL query based on user question."""
+Respond with a JSON object (no markdown, just raw JSON):
+{
+    "needs_sql": true/false,
+    "needs_viz": true/false,
+    "chart_type": "bar" | "line" | "pie" | null,
+    "reasoning": "brief explanation"
+}
+
+Guidelines:
+- needs_sql: true for any data question (amounts, counts, lists, totals)
+- needs_viz: true for trends, comparisons, distributions, "show me", "chart", "graph"
+- chart_type:
+  - "bar" for category comparisons (by merchant, by type)
+  - "line" for time series (by month, by week, trends)
+  - "pie" for proportions (percentage breakdown)
+  - null if no visualization needed
+
+Examples:
+- "What's my total spend?" → {"needs_sql": true, "needs_viz": false, "chart_type": null}
+- "Show expenses by category" → {"needs_sql": true, "needs_viz": true, "chart_type": "bar"}
+- "How has spending changed over time?" → {"needs_sql": true, "needs_viz": true, "chart_type": "line"}
+"""
+
+        try:
+            response = llm.invoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"User question: {user_question}"),
+            ])
+
+            # Parse JSON response
+            content = response.content.strip()
+            # Clean up markdown if present
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.strip()
+
+            routing = json.loads(content)
+
+            return {
+                "user_question": user_question,
+                "needs_sql": routing.get("needs_sql", True),
+                "needs_viz": routing.get("needs_viz", False),
+                "chart_type": routing.get("chart_type"),
+                "sql_query": None,
+                "sql_results": None,
+                "chart_path": None,
+                "final_response": None,
+                "error": None,
+            }
+
+        except Exception:
+            # Default to SQL only on parsing errors
+            return {
+                "user_question": user_question,
+                "needs_sql": True,
+                "needs_viz": False,
+                "chart_type": None,
+                "error": None,
+            }
+
+    # =========================================================================
+    # SQL AGENT - Generates and executes queries
+    # =========================================================================
+    def sql_agent(state: MultiAgentState) -> dict:
+        """Generate and execute SQL query."""
         user_question = state["user_question"]
+        needs_viz = state.get("needs_viz", False)
 
-        system_prompt = f"""You are a SQL query generator for a finance database.
+        # Adjust prompt based on whether we need viz data
+        viz_hint = ""
+        if needs_viz:
+            chart_type = state.get("chart_type", "bar")
+            viz_hint = f"""
+IMPORTANT: The results will be used for a {chart_type} chart.
+- For bar/pie charts: Include a category column and a value column
+- For line charts: Include a date/time column and a value column
+- Keep the result set reasonable (max 10-15 rows for readability)
+- Use GROUP BY and ORDER BY appropriately
+"""
+
+        system_prompt = f"""You are a SQL expert for a finance database.
 
 Database Schema:
 {schema_info}
 
 {sample_data_info}
 
-Generate a SQL query to answer the user's question. Return ONLY the SQL query, nothing else.
-
-Important:
-- Only generate SELECT queries
-- Use the schema and sample data above for accuracy
-- Ensure proper SQL syntax
-- Keep queries simple and efficient"""
-
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=f"Generate SQL query for: {user_question}"),
-        ]
+Generate a SQL query to answer the user's question.
+Return ONLY the SQL query, nothing else.
+{viz_hint}
+Rules:
+- Only SELECT queries allowed
+- Use proper SQL Server syntax
+- Keep queries efficient"""
 
         try:
-            response = llm.invoke(messages)
-            sql_query = response.content.strip()
+            response = llm.invoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=f"Generate SQL for: {user_question}"),
+            ])
 
-            # Clean up markdown code blocks if present
+            sql_query = response.content.strip()
+            # Clean markdown
             if sql_query.startswith("```sql"):
                 sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
             elif sql_query.startswith("```"):
                 sql_query = sql_query.replace("```", "").strip()
 
-            return {"sql_query": sql_query, "error": None}
-
-        except Exception as e:
-            return {"sql_query": None, "error": f"SQL generation failed: {str(e)}"}
-
-    # Node 3: Execute SQL query
-    def execute(state: AgentState) -> dict:
-        """Execute the generated SQL query."""
-        sql_query = state["sql_query"]
-
-        if not sql_query:
-            return {"results": None, "error": "No SQL query to execute"}
-
-        try:
+            # Execute query
             results = db.execute_sql_query(sql_query)
 
-            # Check if results contain an error
+            # Check for errors in results
             try:
                 results_json = json.loads(results)
                 if isinstance(results_json, dict) and "error" in results_json:
                     return {
-                        "results": None,
-                        "error": f"Query execution failed: {results_json['error']}",
+                        "sql_query": sql_query,
+                        "sql_results": None,
+                        "error": f"SQL Error: {results_json['error']}",
                     }
             except json.JSONDecodeError:
                 pass
 
-            return {"results": results, "error": None}
-
-        except Exception as e:
-            return {"results": None, "error": f"Execution error: {str(e)}"}
-
-    # Node 4: Respond with natural language
-    def respond(state: AgentState) -> dict:
-        """Format results into natural language response."""
-        user_question = state["user_question"]
-        sql_query = state["sql_query"]
-        results = state["results"]
-        error = state["error"]
-
-        # Handle error case
-        if error:
-            system_prompt = f"""You are a helpful assistant explaining why a database query failed.
-
-User asked: {user_question}
-Generated SQL: {sql_query or "None"}
-Error: {error}
-
-Explain the error in simple terms and suggest what might be wrong."""
-
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(
-                    content="Explain why this query failed and what could be done differently."
-                ),
-            ]
-
-        else:
-            # Success case
-            system_prompt = f"""You are a helpful assistant presenting database query results.
-
-User asked: {user_question}
-SQL query used: {sql_query}
-Results: {results}
-
-Provide a clear, natural language answer to the user's question based on these results."""
-
-            messages = [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content="Summarize the results for the user."),
-            ]
-
-        try:
-            response = llm.invoke(messages)
-            return {"messages": [AIMessage(content=response.content)]}
+            return {
+                "sql_query": sql_query,
+                "sql_results": results,
+                "error": None,
+            }
 
         except Exception as e:
             return {
-                "messages": [
-                    AIMessage(content=f"Sorry, I encountered an error: {str(e)}")
-                ]
+                "sql_query": None,
+                "sql_results": None,
+                "error": f"SQL Agent error: {str(e)}",
             }
 
-    # Routing functions
-    def should_generate_sql(state: AgentState) -> Literal["generate_sql", "end"]:
-        """Route from analyze to generate_sql or end."""
-        if state.get("user_question"):
-            return "generate_sql"
-        return "end"
+    # =========================================================================
+    # VISUALIZATION AGENT - Creates charts
+    # =========================================================================
+    def viz_agent(state: MultiAgentState) -> dict:
+        """Create visualization from SQL results."""
+        sql_results = state.get("sql_results")
+        chart_type = state.get("chart_type", "bar")
+        user_question = state.get("user_question", "")
 
-    def should_execute(state: AgentState) -> Literal["execute", "respond"]:
-        """Route from generate_sql to execute or respond (on error)."""
-        if state.get("sql_query") and not state.get("error"):
-            return "execute"
-        return "respond"
+        if not sql_results:
+            return {"chart_path": None, "error": "No data to visualize"}
 
-    def should_respond(_state: AgentState) -> Literal["respond"]:
-        """Always route to respond after execute."""
-        return "respond"
+        try:
+            data = json.loads(sql_results)
+            if not data or not isinstance(data, list):
+                return {"chart_path": None, "error": "No data to visualize"}
 
-    # Build the graph
-    graph = StateGraph(AgentState)
+            # Get column names from first row
+            columns = list(data[0].keys())
 
-    # Add nodes
-    graph.add_node("analyze", analyze)
-    graph.add_node("generate_sql", generate_sql)
-    graph.add_node("execute", execute)
-    graph.add_node("respond", respond)
+            # Determine x and y columns
+            # Heuristic: First column is usually category/date, second is value
+            x_col = columns[0]
+            y_col = columns[1] if len(columns) > 1 else columns[0]
+
+            # Extract data
+            x_values = [str(row.get(x_col, ""))[:20] for row in data]  # Truncate long labels
+            y_values = [float(row.get(y_col, 0)) for row in data]
+
+            # Create figure
+            fig, ax = plt.subplots(figsize=(10, 6))
+
+            if chart_type == "pie":
+                # Pie chart
+                ax.pie(y_values, labels=x_values, autopct="%1.1f%%", startangle=90)
+                ax.set_title(f"Distribution: {user_question[:50]}")
+            elif chart_type == "line":
+                # Line chart
+                ax.plot(x_values, y_values, marker="o", linewidth=2, markersize=8)
+                ax.set_xlabel(x_col)
+                ax.set_ylabel(y_col)
+                ax.set_title(f"Trend: {user_question[:50]}")
+                plt.xticks(rotation=45, ha="right")
+            else:
+                # Bar chart (default)
+                bars = ax.bar(x_values, y_values, color="steelblue")
+                ax.set_xlabel(x_col)
+                ax.set_ylabel(y_col)
+                ax.set_title(f"Comparison: {user_question[:50]}")
+                plt.xticks(rotation=45, ha="right")
+
+                # Add value labels on bars
+                for bar, val in zip(bars, y_values):
+                    height = bar.get_height()
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2.0,
+                        height,
+                        f"{val:,.0f}",
+                        ha="center",
+                        va="bottom",
+                        fontsize=9,
+                    )
+
+            plt.tight_layout()
+
+            # Save to file
+            chart_path = "/tmp/chart.png"
+            plt.savefig(chart_path, dpi=100, bbox_inches="tight")
+            plt.close(fig)
+
+            return {"chart_path": chart_path, "error": None}
+
+        except Exception as e:
+            return {"chart_path": None, "error": f"Visualization error: {str(e)}"}
+
+    # =========================================================================
+    # RESPONSE AGENT - Synthesizes final response
+    # =========================================================================
+    def response_agent(state: MultiAgentState) -> dict:
+        """Synthesize final response from all agent outputs."""
+        user_question = state.get("user_question", "")
+        sql_query = state.get("sql_query")
+        sql_results = state.get("sql_results")
+        chart_path = state.get("chart_path")
+        error = state.get("error")
+
+        # Handle error case
+        if error:
+            system_prompt = f"""The user asked: "{user_question}"
+An error occurred: {error}
+
+Explain the error briefly and suggest what might help."""
+
+            response = llm.invoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content="Explain the error to the user."),
+            ])
+            return {
+                "final_response": response.content,
+                "messages": [AIMessage(content=response.content)],
+            }
+
+        # Build context for response
+        context_parts = [f'User asked: "{user_question}"']
+
+        if sql_query:
+            context_parts.append(f"SQL query executed: {sql_query}")
+
+        if sql_results:
+            context_parts.append(f"Query results: {sql_results}")
+
+        if chart_path:
+            context_parts.append(f"A chart has been generated and saved to: {chart_path}")
+
+        context = "\n".join(context_parts)
+
+        system_prompt = f"""You are a helpful finance assistant presenting results.
+
+{context}
+
+Provide a clear, natural language summary of the results.
+- Be concise but informative
+- Highlight key numbers or insights
+- If a chart was generated, mention that the user can view it
+- Format numbers nicely (use commas for thousands)"""
+
+        try:
+            response = llm.invoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content="Summarize the results for the user."),
+            ])
+
+            final_response = response.content
+
+            # Add chart notification if generated
+            if chart_path:
+                final_response += f"\n\n📊 Chart saved to: {chart_path}"
+
+            return {
+                "final_response": final_response,
+                "messages": [AIMessage(content=final_response)],
+            }
+
+        except Exception as e:
+            error_msg = f"Error generating response: {str(e)}"
+            return {
+                "final_response": error_msg,
+                "messages": [AIMessage(content=error_msg)],
+            }
+
+    # =========================================================================
+    # ROUTING FUNCTIONS
+    # =========================================================================
+    def route_after_supervisor(state: MultiAgentState) -> Literal["sql_agent", "response_agent"]:
+        """Route after supervisor - always go to SQL if needed."""
+        if state.get("needs_sql", True):
+            return "sql_agent"
+        return "response_agent"
+
+    def route_after_sql(state: MultiAgentState) -> Literal["viz_agent", "response_agent"]:
+        """Route after SQL - go to viz if needed and no error."""
+        if state.get("error"):
+            return "response_agent"
+        if state.get("needs_viz", False):
+            return "viz_agent"
+        return "response_agent"
+
+    def route_after_viz(_state: MultiAgentState) -> Literal["response_agent"]:
+        """Always go to response after viz."""
+        return "response_agent"
+
+    # =========================================================================
+    # BUILD THE GRAPH
+    # =========================================================================
+    graph = StateGraph(MultiAgentState)
+
+    # Add agent nodes
+    graph.add_node("supervisor", supervisor)
+    graph.add_node("sql_agent", sql_agent)
+    graph.add_node("viz_agent", viz_agent)
+    graph.add_node("response_agent", response_agent)
 
     # Add edges
-    graph.add_edge(START, "analyze")
+    graph.add_edge(START, "supervisor")
     graph.add_conditional_edges(
-        "analyze", should_generate_sql, {"generate_sql": "generate_sql", "end": END}
+        "supervisor",
+        route_after_supervisor,
+        {"sql_agent": "sql_agent", "response_agent": "response_agent"},
     )
     graph.add_conditional_edges(
-        "generate_sql", should_execute, {"execute": "execute", "respond": "respond"}
+        "sql_agent",
+        route_after_sql,
+        {"viz_agent": "viz_agent", "response_agent": "response_agent"},
     )
-    graph.add_conditional_edges("execute", should_respond, {"respond": "respond"})
-    graph.add_edge("respond", END)
+    graph.add_conditional_edges(
+        "viz_agent",
+        route_after_viz,
+        {"response_agent": "response_agent"},
+    )
+    graph.add_edge("response_agent", END)
 
-    # Compile and return
     return graph.compile()
 
 
 def main():
     print("=" * 60)
-    print("fin_chatbot - LangGraph SQL Agent (Phase 9)")
+    print("fin_chatbot - Multi-Agent System (Phase 10)")
     print("=" * 60)
-    print("Powered by specialized SQL workflow nodes")
+    print("Agents: Supervisor → SQL → Visualization → Response")
     print("Ask questions about your transactions!")
+    print('Try: "Show my expenses by category" for a chart')
     print("Type 'quit' or 'exit' to end the conversation")
     print("Press Ctrl+C to interrupt")
     print("=" * 60)
@@ -260,37 +457,33 @@ def main():
         temperature=0,
     )
 
-    # Create the SQL agent graph
-    agent_graph = create_sql_agent_graph(llm, schema_info, sample_data_info)
+    # Create the multi-agent system
+    agent_system = create_multi_agent_system(llm, schema_info, sample_data_info)
 
-    # Display the graph structure
-    print("SQL Agent Graph Structure:")
+    # Display the architecture
+    print("Multi-Agent Architecture:")
     print("-" * 40)
-    print("  START")
-    print("    │")
-    print("    ▼")
-    print("  ┌─────────┐")
-    print("  │ analyze │")
-    print("  └────┬────┘")
-    print("       │")
-    print("       ▼")
-    print("  ┌──────────────┐")
-    print("  │ generate_sql │")
-    print("  └───────┬──────┘")
-    print("      error│  ok")
-    print("        ┌──┴───┐")
-    print("        ▼      ▼")
-    print("    ┌────────┐ ┌─────────┐")
-    print("    │respond │ │ execute │")
-    print("    └────┬───┘ └────┬────┘")
-    print("         │          │")
-    print("         │          ▼")
-    print("         │     ┌────────┐")
-    print("         └────►│respond │")
-    print("               └───┬────┘")
-    print("                   │")
-    print("                   ▼")
-    print("                  END")
+    print("           ┌────────────┐")
+    print("           │ SUPERVISOR │")
+    print("           └─────┬──────┘")
+    print("                 │")
+    print("           ┌─────▼──────┐")
+    print("           │ SQL_AGENT  │")
+    print("           └─────┬──────┘")
+    print("          needs_viz?")
+    print("           yes/  \\no")
+    print("             /    \\")
+    print("   ┌─────────▼┐    │")
+    print("   │VIZ_AGENT │    │")
+    print("   └─────┬────┘    │")
+    print("         │         │")
+    print("         └────┬────┘")
+    print("              ▼")
+    print("      ┌──────────────┐")
+    print("      │RESPONSE_AGENT│")
+    print("      └──────┬───────┘")
+    print("             ▼")
+    print("            END")
     print("-" * 40)
     print()
 
@@ -313,39 +506,39 @@ def main():
             # Add user message
             messages.append(HumanMessage(content=user_input))
 
-            # Execute agent graph
+            # Execute multi-agent system
             try:
-                result = agent_graph.invoke(
-                    {
-                        "messages": messages,
-                        "user_question": "",
-                        "sql_query": None,
-                        "results": None,
-                        "error": None,
-                    }
-                )
+                result = agent_system.invoke({
+                    "messages": messages,
+                    "user_question": "",
+                    "needs_sql": False,
+                    "needs_viz": False,
+                    "sql_query": None,
+                    "sql_results": None,
+                    "chart_type": None,
+                    "chart_path": None,
+                    "final_response": None,
+                    "error": None,
+                })
 
-                # Extract the final AI message
-                response_content = None
-                if "messages" in result:
-                    for msg in reversed(result["messages"]):
-                        if isinstance(msg, AIMessage) and msg.content:
-                            response_content = msg.content
-                            break
+                # Get final response
+                final_response = result.get("final_response", "")
 
-                if response_content:
-                    print(f"\nAssistant: {response_content}\n")
-                    # Update messages with full conversation
-                    messages = list(result["messages"])
+                if final_response:
+                    print(f"\nAssistant: {final_response}\n")
+                    messages = list(result.get("messages", messages))
                 else:
                     print("\nAssistant: [No response generated]\n")
 
-                # Debug: Show SQL query if available
+                # Debug info
                 if result.get("sql_query"):
-                    print(f"[SQL Query]: {result['sql_query']}\n")
+                    print(f"[SQL]: {result['sql_query']}")
+                if result.get("needs_viz"):
+                    print(f"[Viz]: {result.get('chart_type', 'unknown')} chart")
+                if result.get("sql_query") or result.get("needs_viz"):
+                    print()
 
             except Exception as e:
-                # Remove last user message on error
                 messages.pop()
                 print(f"\nError: {e}\n")
 
