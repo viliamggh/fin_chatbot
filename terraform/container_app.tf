@@ -41,6 +41,16 @@ resource "azurerm_container_app" "chatbot" {
     value = local.openai_api_key
   }
 
+  secret {
+    name  = "auth-user"
+    value = local.chatbot_auth_user
+  }
+
+  secret {
+    name  = "auth-pass"
+    value = local.chatbot_auth_pass
+  }
+
   template {
     container {
       name   = replace(var.image_name, "_", "")
@@ -94,6 +104,17 @@ resource "azurerm_container_app" "chatbot" {
       env {
         name  = "AZURE_TENANT_ID"
         value = local.app_identity_tenant_id
+      }
+
+      # Gradio authentication
+      env {
+        name        = "GRADIO_AUTH_USER"
+        secret_name = "auth-user"
+      }
+
+      env {
+        name        = "GRADIO_AUTH_PASS"
+        secret_name = "auth-pass"
       }
     }
 

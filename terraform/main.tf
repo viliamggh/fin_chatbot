@@ -45,6 +45,16 @@ data "azurerm_key_vault_secret" "openai_api_key" {
   key_vault_id = data.terraform_remote_state.core_infra.outputs.key_vault_id
 }
 
+data "azurerm_key_vault_secret" "chatbot_auth_user" {
+  name         = "chatbot-auth-user"
+  key_vault_id = data.terraform_remote_state.core_infra.outputs.key_vault_id
+}
+
+data "azurerm_key_vault_secret" "chatbot_auth_pass" {
+  name         = "chatbot-auth-pass"
+  key_vault_id = data.terraform_remote_state.core_infra.outputs.key_vault_id
+}
+
 # Local variables for core infrastructure references
 locals {
   # App resource group
@@ -67,6 +77,10 @@ locals {
   openai_endpoint        = data.terraform_remote_state.core_infra.outputs.openai_endpoint
   openai_deployment_name = data.terraform_remote_state.core_infra.outputs.openai_deployment_name
   openai_api_key         = data.azurerm_key_vault_secret.openai_api_key.value
+
+  # Chatbot authentication credentials
+  chatbot_auth_user = data.azurerm_key_vault_secret.chatbot_auth_user.value
+  chatbot_auth_pass = data.azurerm_key_vault_secret.chatbot_auth_pass.value
 
   # Shared application identity (from fin_az_core)
   app_identity_id           = data.terraform_remote_state.core_infra.outputs.app_identity_id

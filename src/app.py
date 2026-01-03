@@ -192,7 +192,16 @@ def main():
 
     initialize_agent()
 
+    # Get authentication credentials from environment
+    auth_user = os.getenv("GRADIO_AUTH_USER")
+    auth_pass = os.getenv("GRADIO_AUTH_PASS")
+
+    # Configure auth tuple (or None if not set)
+    auth = (auth_user, auth_pass) if auth_user and auth_pass else None
+
     print("\nStarting web server...")
+    if auth:
+        print("Authentication enabled")
     print("Open http://localhost:7860 in your browser")
     print("=" * 60)
 
@@ -200,6 +209,7 @@ def main():
         server_name="0.0.0.0",
         server_port=7860,
         share=False,
+        auth=auth,
     )
 
 
