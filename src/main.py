@@ -1,7 +1,8 @@
 """
 fin_chatbot - Natural Language to SQL Chatbot
 
-Phase 10: Multi-Agent System - Supervisor + SQL Agent + Viz Agent + Response Agent
+Phase 11: Multi-Agent System with CLI interface.
+For web interface, run: uv run python app.py
 """
 
 from typing import Annotated, Literal
@@ -16,6 +17,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import os
 import json
+import tempfile
 import db
 
 # Use non-interactive backend for matplotlib
@@ -244,8 +246,11 @@ Rules:
             fig, ax = plt.subplots(figsize=(10, 6))
 
             if chart_type == "pie":
-                # Pie chart
-                ax.pie(y_values, labels=x_values, autopct="%1.1f%%", startangle=90)
+                # Pie chart - use absolute values (can't show negatives)
+                y_abs = [abs(v) for v in y_values]
+                if sum(y_abs) == 0:
+                    return {"chart_path": None, "error": "No non-zero data to visualize"}
+                ax.pie(y_abs, labels=x_values, autopct="%1.1f%%", startangle=90)
                 ax.set_title(f"Distribution: {user_question[:50]}")
             elif chart_type == "line":
                 # Line chart
@@ -276,8 +281,8 @@ Rules:
 
             plt.tight_layout()
 
-            # Save to file
-            chart_path = "/tmp/chart.png"
+            # Save to system temp directory (Gradio compatible)
+            chart_path = os.path.join(tempfile.gettempdir(), "chart.png")
             plt.savefig(chart_path, dpi=100, bbox_inches="tight")
             plt.close(fig)
 
@@ -417,13 +422,13 @@ Provide a clear, natural language summary of the results.
 
 def main():
     print("=" * 60)
-    print("fin_chatbot - Multi-Agent System (Phase 10)")
+    print("fin_chatbot - Multi-Agent System (CLI)")
     print("=" * 60)
     print("Agents: Supervisor → SQL → Visualization → Response")
     print("Ask questions about your transactions!")
     print('Try: "Show my expenses by category" for a chart')
     print("Type 'quit' or 'exit' to end the conversation")
-    print("Press Ctrl+C to interrupt")
+    print("For web interface: uv run python app.py")
     print("=" * 60)
     print()
 

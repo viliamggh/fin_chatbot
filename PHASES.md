@@ -458,11 +458,67 @@ cd src && uv run python main.py
 
 ---
 
-## Upcoming Phases
+### Phase 11: Deployment & GUI ✅
+**Tag**: `phase-11-deployment`
+**Date**: 2026-01-02
+**Key Concepts**:
+- Gradio web interface
+- Containerization with Docker
+- ODBC driver setup for SQL Server
+- Two interfaces: CLI + Web
 
-### Phase 11: Deployment & GUI
-**Tag**: `phase-11-deployment` (pending)
-**Key Concepts**: Containerization, FastAPI, GUI, Azure deployment
+**Key Files**:
+- `src/app.py` - Gradio web interface
+- `src/Dockerfile` - Container with all dependencies
+- `src/.dockerignore` - Clean builds
+- `src/pyproject.toml` - Added gradio, fastapi, uvicorn
+
+**What You'll Learn**:
+- Building web UIs with Gradio
+- Displaying charts alongside chat
+- Docker containerization with ODBC drivers
+- Exposing ML apps as web services
+
+**Implementation Details**:
+- `app.py` - Gradio Blocks UI with chat + chart display
+- Reuses `create_multi_agent_system()` from main.py
+- Messages format: `{"role": "user/assistant", "content": "..."}`
+- Chart displayed in separate column
+- Dockerfile with Python 3.11 + ODBC Driver 18
+
+**Two Ways to Run**:
+```bash
+# CLI interface
+cd src && uv run python main.py
+
+# Web interface
+cd src && uv run python app.py
+# Open http://localhost:7860
+```
+
+**Docker Build**:
+```bash
+cd src
+docker build -t fin-chatbot .
+docker run -p 7860:7860 --env-file .env fin-chatbot
+```
+
+---
+
+## All Phases Complete! 🎉
+
+This completes the fin_chatbot tutorial covering:
+1. Azure OpenAI API basics
+2. Chat history management
+3. Tool/function calling
+4. Azure SQL database connection
+5. ReAct agent pattern
+6. Production-grade features
+7. LangChain framework
+8. LangGraph state graphs
+9. Specialized SQL workflow
+10. Multi-agent orchestration
+11. Web deployment with Gradio
 
 ---
 

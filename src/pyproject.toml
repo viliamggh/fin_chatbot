@@ -11,6 +11,9 @@ dependencies = [
     "langchain-openai",
     "langgraph",
     "matplotlib",
+    "fastapi",
+    "uvicorn",
+    "gradio",
 ]
 
 [tool.uv]
