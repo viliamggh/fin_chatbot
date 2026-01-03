@@ -1,0 +1,139 @@
+name: 'Terraform Plan/Apply'
+
+on:
+  workflow_dispatch:
+    inputs:
+      tf_apply:
+        description: 'Run Terraform apply?'
+        required: false
+        type: string
+        default: "true"
+  push:
+    branches:
+      - main
+      - dev
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  UAMI_ID: ${{ vars.UAMI_ID }}
+  ARM_SUBSCRIPTION_ID: "${{ vars.SUB_ID }}"
+  ARM_TENANT_ID: "${{ vars.TENANT_ID }}"
+
+jobs:
+
+  build-image:
+    environment: main
+    name: Image Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Load infrastructure configuration
+        id: config
+        run: |
+          CORE_ACR_NAME=$(yq '.core_infra.resources.acr_name' .infra-refs.yaml)
+          echo "core_acr_name=$CORE_ACR_NAME" >> $GITHUB_OUTPUT
+
+      - name: Login to Azure using Federated Credentials
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.UAMI_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUB_ID }}
+
+      - name: Get ACR access token
+        id: acrtoken
+        run: |
+          TOKEN=$(az acr login --name ${{ steps.config.outputs.core_acr_name }} --expose-token --query accessToken -o tsv)
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Docker login to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: "${{ steps.config.outputs.core_acr_name }}.azurecr.io"
+          username: 00000000-0000-0000-0000-000000000000
+          password: ${{ steps.acrtoken.outputs.token }}
+
+      - name: fin_chatbot app - build docker image
+        working-directory: src
+        run: |
+          docker build -t ${{ steps.config.outputs.core_acr_name }}.azurecr.io/fin_chatbot:main .
+
+      - name: fin_chatbot app - push to ACR
+        run: |
+          docker push ${{ steps.config.outputs.core_acr_name }}.azurecr.io/fin_chatbot:main
+
+  infra-deploy:
+    environment: main
+    needs: build-image
+    name: 'Az Infra Deploy'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login to Azure using Federated Credentials
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.UAMI_ID }}
+          tenant-id: ${{ vars.TENANT_ID }}
+          subscription-id: ${{ vars.SUB_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Load infrastructure configuration
+        id: tf_config
+        run: |
+          CORE_RG=$(yq '.core_infra.terraform_backend.resource_group_name' .infra-refs.yaml)
+          CORE_SA=$(yq '.core_infra.terraform_backend.storage_account_name' .infra-refs.yaml)
+          CORE_CONTAINER=$(yq '.core_infra.terraform_backend.container_name' .infra-refs.yaml)
+          CORE_KEY=$(yq '.core_infra.terraform_backend.key' .infra-refs.yaml)
+          echo "core_rg=$CORE_RG" >> $GITHUB_OUTPUT
+          echo "core_sa=$CORE_SA" >> $GITHUB_OUTPUT
+          echo "core_container=$CORE_CONTAINER" >> $GITHUB_OUTPUT
+          echo "core_key=$CORE_KEY" >> $GITHUB_OUTPUT
+
+      - name: Create runtime tfbackend.conf
+        working-directory: terraform
+        run: |
+            cat > tfbackend.conf <<EOF
+            resource_group_name  = "${{ vars.RG_NAME }}"
+            storage_account_name = "${{ vars.STORAGE_ACCOUNT_NAME }}"
+            container_name       = "${{ vars.CONTAINER_NAME }}"
+            key                  = "terraform.tfstate"
+            EOF
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init -backend-config=tfbackend.conf
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: |
+            terraform plan \
+            -var 'rg_name=${{ vars.RG_NAME }}' \
+            -var 'project_name_no_dash=${{ vars.PROJECT_NAME_NODASH }}' \
+            -var 'core_infra_rg=${{ steps.tf_config.outputs.core_rg }}' \
+            -var 'core_infra_sa=${{ steps.tf_config.outputs.core_sa }}' \
+            -var 'core_infra_container=${{ steps.tf_config.outputs.core_container }}' \
+            -var 'core_infra_key=${{ steps.tf_config.outputs.core_key }}'
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: |
+            terraform apply -auto-approve \
+            -var 'rg_name=${{ vars.RG_NAME }}' \
+            -var 'project_name_no_dash=${{ vars.PROJECT_NAME_NODASH }}' \
+            -var 'core_infra_rg=${{ steps.tf_config.outputs.core_rg }}' \
+            -var 'core_infra_sa=${{ steps.tf_config.outputs.core_sa }}' \
+            -var 'core_infra_container=${{ steps.tf_config.outputs.core_container }}' \
+            -var 'core_infra_key=${{ steps.tf_config.outputs.core_key }}'
