@@ -125,7 +125,9 @@ jobs:
             -var 'core_infra_rg=${{ steps.tf_config.outputs.core_rg }}' \
             -var 'core_infra_sa=${{ steps.tf_config.outputs.core_sa }}' \
             -var 'core_infra_container=${{ steps.tf_config.outputs.core_container }}' \
-            -var 'core_infra_key=${{ steps.tf_config.outputs.core_key }}'
+            -var 'core_infra_key=${{ steps.tf_config.outputs.core_key }}' \
+            -var 'langfuse_public_key=${{ secrets.LANGFUSE_PUBLIC_KEY }}' \
+            -var 'langfuse_secret_key=${{ secrets.LANGFUSE_SECRET_KEY }}'
 
       - name: Terraform Apply
         working-directory: terraform
@@ -136,4 +138,6 @@ jobs:
             -var 'core_infra_rg=${{ steps.tf_config.outputs.core_rg }}' \
             -var 'core_infra_sa=${{ steps.tf_config.outputs.core_sa }}' \
             -var 'core_infra_container=${{ steps.tf_config.outputs.core_container }}' \
-            -var 'core_infra_key=${{ steps.tf_config.outputs.core_key }}'
+            -var 'core_infra_key=${{ steps.tf_config.outputs.core_key }}' \
+            -var 'langfuse_public_key=${{ secrets.LANGFUSE_PUBLIC_KEY }}' \
+            -var 'langfuse_secret_key=${{ secrets.LANGFUSE_SECRET_KEY }}'

@@ -7,8 +7,10 @@ Phase 11: Gradio web interface for the multi-agent finance chatbot.
 import gradio as gr
 from langchain_openai import AzureChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
+from langfuse.callback import CallbackHandler
 from dotenv import load_dotenv
 import os
+import uuid
 import db
 
 # Import the multi-agent system from main
@@ -20,11 +22,12 @@ load_dotenv()
 agent_system = None
 schema_info = ""
 sample_data_info = ""
+langfuse_handler = None
 
 
 def initialize_agent():
     """Initialize the multi-agent system."""
-    global agent_system, schema_info, sample_data_info
+    global agent_system, schema_info, sample_data_info, langfuse_handler
 
     # Load schema
     try:
@@ -51,6 +54,23 @@ def initialize_agent():
 
     # Create agent
     agent_system = create_multi_agent_system(llm, schema_info, sample_data_info)
+
+    # Initialize Langfuse callback (optional)
+    if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
+        try:
+            session_id = f"gradio-{uuid.uuid4().hex[:8]}"
+            langfuse_handler = CallbackHandler(
+                public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+                secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+                host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+                session_id=session_id,
+                user_id="gradio-user",
+                metadata={"interface": "gradio"},
+            )
+            print(f"✓ Langfuse tracing enabled (session: {session_id})")
+        except Exception as e:
+            print(f"⚠ Langfuse initialization failed: {e}")
+
     print("Agent initialized successfully!")
 
 
@@ -82,6 +102,11 @@ def chat(message: str, history: list) -> tuple[list, str | None]:
     messages.append(HumanMessage(content=message))
 
     try:
+        # Build config with optional Langfuse callback
+        config = {}
+        if langfuse_handler:
+            config["callbacks"] = [langfuse_handler]
+
         # Run the multi-agent system
         result = agent_system.invoke({
             "messages": messages,
@@ -94,7 +119,7 @@ def chat(message: str, history: list) -> tuple[list, str | None]:
             "chart_path": None,
             "final_response": None,
             "error": None,
-        })
+        }, config=config if config else None)
 
         response = result.get("final_response", "No response generated.")
         chart_path = result.get("chart_path")

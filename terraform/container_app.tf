@@ -51,6 +51,15 @@ resource "azurerm_container_app" "chatbot" {
     value = local.chatbot_auth_pass
   }
 
+  # Langfuse observability (optional - only add if keys provided)
+  dynamic "secret" {
+    for_each = var.langfuse_secret_key != "" ? [1] : []
+    content {
+      name  = "langfuse-secret-key"
+      value = var.langfuse_secret_key
+    }
+  }
+
   template {
     container {
       name   = replace(var.image_name, "_", "")
@@ -115,6 +124,31 @@ resource "azurerm_container_app" "chatbot" {
       env {
         name        = "GRADIO_AUTH_PASS"
         secret_name = "auth-pass"
+      }
+
+      # Langfuse Observability (optional)
+      dynamic "env" {
+        for_each = var.langfuse_public_key != "" ? [1] : []
+        content {
+          name  = "LANGFUSE_PUBLIC_KEY"
+          value = var.langfuse_public_key
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.langfuse_secret_key != "" ? [1] : []
+        content {
+          name        = "LANGFUSE_SECRET_KEY"
+          secret_name = "langfuse-secret-key"
+        }
+      }
+
+      dynamic "env" {
+        for_each = var.langfuse_public_key != "" ? [1] : []
+        content {
+          name  = "LANGFUSE_HOST"
+          value = "https://cloud.langfuse.com"
+        }
       }
     }
 

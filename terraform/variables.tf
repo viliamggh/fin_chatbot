@@ -40,3 +40,17 @@ variable "core_infra_key" {
   type        = string
   description = "State file key for fin_az_core terraform state"
 }
+
+# Langfuse Observability
+variable "langfuse_public_key" {
+  type        = string
+  description = "Langfuse public key for observability"
+  default     = ""
+}
+
+variable "langfuse_secret_key" {
+  type        = string
+  description = "Langfuse secret key for observability"
+  sensitive   = true
+  default     = ""
+}

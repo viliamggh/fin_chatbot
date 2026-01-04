@@ -12,12 +12,14 @@ from langchain_openai import AzureChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
+from langfuse.callback import CallbackHandler
 from dotenv import load_dotenv
 import matplotlib.pyplot as plt
 import matplotlib
 import os
 import json
 import tempfile
+import uuid
 import db
 
 # Use non-interactive backend for matplotlib
@@ -465,6 +467,22 @@ def main():
     # Create the multi-agent system
     agent_system = create_multi_agent_system(llm, schema_info, sample_data_info)
 
+    # Initialize Langfuse callback for observability (optional)
+    langfuse_handler = None
+    if os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY"):
+        try:
+            session_id = f"cli-session-{uuid.uuid4().hex[:8]}"
+            langfuse_handler = CallbackHandler(
+                public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+                secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+                host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+                session_id=session_id,
+                user_id="cli-user",
+            )
+            print(f"✓ Langfuse tracing enabled (session: {session_id})\n")
+        except Exception as e:
+            print(f"⚠ Langfuse initialization failed: {e}\n")
+
     # Display the architecture
     print("Multi-Agent Architecture:")
     print("-" * 40)
@@ -513,6 +531,11 @@ def main():
 
             # Execute multi-agent system
             try:
+                # Build config with optional Langfuse callback
+                config = {}
+                if langfuse_handler:
+                    config["callbacks"] = [langfuse_handler]
+
                 result = agent_system.invoke({
                     "messages": messages,
                     "user_question": "",
@@ -524,7 +547,7 @@ def main():
                     "chart_path": None,
                     "final_response": None,
                     "error": None,
-                })
+                }, config=config if config else None)
 
                 # Get final response
                 final_response = result.get("final_response", "")
