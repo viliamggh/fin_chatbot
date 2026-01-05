@@ -23,9 +23,9 @@ import matplotlib.pyplot as plt
 import matplotlib
 import os
 import json
-import tempfile
 import uuid
 import db
+import artifacts
 
 # Use non-interactive backend for matplotlib
 matplotlib.use("Agg")
@@ -42,11 +42,17 @@ class MultiAgentState(TypedDict):
     needs_sql: Whether SQL query is needed
     needs_viz: Whether visualization is needed
     sql_query: Generated SQL query
-    sql_results: Query results (JSON string)
+    sql_results: Query results (JSON string) - for LLM context
     chart_type: Type of chart to generate (bar, line, pie, etc.)
-    chart_path: Path to generated chart image
+    chart_path: Path to generated chart image (UUID-based)
     final_response: Synthesized response for user
     error: Error message if any
+
+    # Structured artifact fields (Phase A2)
+    table_columns: Column names from SQL result
+    table_rows: Row data (capped at 50 rows for UI)
+    row_count: Actual row count before truncation
+    show_table: Progressive disclosure flag
     """
 
     messages: Annotated[list[BaseMessage], add_messages]
@@ -59,6 +65,11 @@ class MultiAgentState(TypedDict):
     chart_path: str | None
     final_response: str | None
     error: str | None
+    # Structured artifact fields
+    table_columns: list[str] | None
+    table_rows: list[list] | None
+    row_count: int | None
+    show_table: bool
 
 
 def create_multi_agent_system(llm: AzureChatOpenAI, schema_info: str, sample_data_info: str):
@@ -135,6 +146,11 @@ Examples:
                 "chart_path": None,
                 "final_response": None,
                 "error": None,
+                # Reset artifact fields
+                "table_columns": None,
+                "table_rows": None,
+                "row_count": None,
+                "show_table": False,
             }
 
         except Exception:
@@ -145,6 +161,11 @@ Examples:
                 "needs_viz": False,
                 "chart_type": None,
                 "error": None,
+                # Reset artifact fields
+                "table_columns": None,
+                "table_rows": None,
+                "row_count": None,
+                "show_table": False,
             }
 
     # =========================================================================
@@ -188,6 +209,13 @@ IMPORTANT: The results will be used for a {chart_type} chart.
 - For line charts: Include a date/time column and a value column
 - Keep the result set reasonable (max 10-15 rows for readability)
 - Use GROUP BY and ORDER BY appropriately
+"""
+        else:
+            # For raw list queries (no visualization), limit rows for UI safety
+            viz_hint = """
+ROW LIMIT: For queries that list individual transactions (not aggregates),
+use TOP 50 to limit results. This keeps the UI responsive.
+Example: SELECT TOP 50 * FROM Transactions WHERE ...
 """
 
         system_prompt = f"""You are a SQL expert for a finance database.
@@ -257,10 +285,28 @@ Example: "December 2025 transactions" → SELECT * FROM Transactions WHERE MONTH
             except json.JSONDecodeError:
                 pass
 
+            # Parse results into table artifact fields
+            table_result = artifacts.results_json_to_table(results)
+
+            if isinstance(table_result, dict) and table_result.get("type") == "error":
+                # SQL returned an error
+                return {
+                    "sql_query": sql_query,
+                    "sql_results": results,
+                    "error": table_result["message"],
+                    "table_columns": None,
+                    "table_rows": None,
+                    "row_count": None,
+                }
+
+            columns, rows, row_count = table_result
             return {
                 "sql_query": sql_query,
                 "sql_results": results,
                 "error": None,
+                "table_columns": columns,
+                "table_rows": rows,
+                "row_count": row_count,
             }
 
         except Exception as e:
@@ -268,11 +314,53 @@ Example: "December 2025 transactions" → SELECT * FROM Transactions WHERE MONTH
                 "sql_query": None,
                 "sql_results": None,
                 "error": f"SQL Agent error: {str(e)}",
+                "table_columns": None,
+                "table_rows": None,
+                "row_count": None,
             }
 
     # =========================================================================
     # VISUALIZATION AGENT - Creates charts
     # =========================================================================
+    def _is_numeric(value) -> bool:
+        """Check if a value is numeric (int, float, or convertible)."""
+        if value is None:
+            return False
+        if isinstance(value, (int, float)):
+            return True
+        try:
+            float(value)
+            return True
+        except (ValueError, TypeError):
+            return False
+
+    def _is_date_like(value) -> bool:
+        """Check if a value looks like a date (ISO format string)."""
+        if value is None:
+            return False
+        if isinstance(value, str):
+            # Check for ISO date patterns: YYYY-MM-DD or YYYY-MM
+            if len(value) >= 7 and value[4] == '-':
+                return True
+        return False
+
+    def _find_numeric_column(data: list, columns: list) -> str | None:
+        """Find the first column with numeric values."""
+        for col in columns:
+            # Sample first few rows to check if column is numeric
+            sample_values = [row.get(col) for row in data[:5] if row.get(col) is not None]
+            if sample_values and all(_is_numeric(v) for v in sample_values):
+                return col
+        return None
+
+    def _find_date_column(data: list, columns: list) -> str | None:
+        """Find the first column with date-like values."""
+        for col in columns:
+            sample_values = [row.get(col) for row in data[:5] if row.get(col) is not None]
+            if sample_values and all(_is_date_like(v) for v in sample_values):
+                return col
+        return None
+
     def viz_agent(state: MultiAgentState) -> dict:
         """Create visualization from SQL results."""
         sql_results = state.get("sql_results")
@@ -290,23 +378,45 @@ Example: "December 2025 transactions" → SELECT * FROM Transactions WHERE MONTH
             # Get column names from first row
             columns = list(data[0].keys())
 
-            # Determine x and y columns
-            # Heuristic: First column is usually category/date, second is value
-            x_col = columns[0]
-            y_col = columns[1] if len(columns) > 1 else columns[0]
+            if len(columns) < 2:
+                return {
+                    "chart_path": None,
+                    "error": "Need at least 2 columns for visualization (category + value)."
+                }
+
+            # Smart column detection
+            # 1. Find numeric column for y-axis (required)
+            y_col = _find_numeric_column(data, columns)
+            if not y_col:
+                return {
+                    "chart_path": None,
+                    "error": "Cannot chart: no numeric column found. Try asking for aggregated data (counts, sums, averages) instead of listing raw transactions."
+                }
+
+            # 2. Find x-axis column
+            # For line charts, prefer date columns
+            if chart_type == "line":
+                date_col = _find_date_column(data, columns)
+                if date_col:
+                    x_col = date_col
+                else:
+                    # Use first non-numeric column, or first column
+                    x_col = next((c for c in columns if c != y_col), columns[0])
+            else:
+                # For bar/pie: use first column that's not the y column
+                x_col = next((c for c in columns if c != y_col), columns[0])
 
             # Extract data
             x_values = [str(row.get(x_col, ""))[:20] for row in data]  # Truncate long labels
 
-            # Try to convert y_values to float - handle non-numeric columns
-            try:
-                y_values = [float(row.get(y_col, 0)) for row in data]
-            except (ValueError, TypeError) as e:
-                # Column contains non-numeric data (e.g., dates, strings)
-                return {
-                    "chart_path": None,
-                    "error": f"Cannot visualize: column '{y_col}' contains non-numeric data. Try asking for aggregated data (counts, sums, averages) instead of listing transactions."
-                }
+            # Convert y_values to float (we already verified they're numeric)
+            y_values = []
+            for row in data:
+                val = row.get(y_col, 0)
+                try:
+                    y_values.append(float(val) if val is not None else 0.0)
+                except (ValueError, TypeError):
+                    y_values.append(0.0)
 
             # Create figure
             fig, ax = plt.subplots(figsize=(10, 6))
@@ -347,8 +457,8 @@ Example: "December 2025 transactions" → SELECT * FROM Transactions WHERE MONTH
 
             plt.tight_layout()
 
-            # Save to system temp directory (Gradio compatible)
-            chart_path = os.path.join(tempfile.gettempdir(), "chart.png")
+            # Save to system temp directory with UUID (no collisions)
+            chart_path = artifacts.generate_unique_chart_path()
             plt.savefig(chart_path, dpi=100, bbox_inches="tight")
             plt.close(fig)
 
@@ -367,6 +477,21 @@ Example: "December 2025 transactions" → SELECT * FROM Transactions WHERE MONTH
         sql_results = state.get("sql_results")
         chart_path = state.get("chart_path")
         error = state.get("error")
+        row_count = state.get("row_count", 0) or 0
+
+        # Progressive disclosure: determine if table should be shown
+        # Show table if:
+        # 1. User explicitly asks for data/table/list
+        # 2. Row count is small (<=10)
+        show_table = False
+        if row_count > 0:
+            # Check for explicit data request keywords
+            question_lower = user_question.lower()
+            explicit_data_keywords = ["show", "list", "display", "table", "data", "transactions"]
+            has_explicit_request = any(kw in question_lower for kw in explicit_data_keywords)
+
+            if has_explicit_request or row_count <= 10:
+                show_table = True
 
         # Handle error case
         if error:
@@ -382,6 +507,7 @@ Explain the error briefly and suggest what might help."""
             return {
                 "final_response": response.content,
                 "messages": [AIMessage(content=response.content)],
+                "show_table": False,
             }
 
         # Build context for response
@@ -393,8 +519,10 @@ Explain the error briefly and suggest what might help."""
         if sql_results:
             context_parts.append(f"Query results: {sql_results}")
 
-        if chart_path and chart_path.strip():
-            context_parts.append(f"A chart has been generated and saved to: {chart_path}")
+        # Note: We no longer tell the LLM about chart paths - UI handles that
+        has_chart = bool(chart_path and chart_path.strip())
+        if has_chart:
+            context_parts.append("A chart has been generated for this data.")
 
         context = "\n".join(context_parts)
 
@@ -407,8 +535,8 @@ Provide a clear, natural language summary of the results.
 - Highlight key numbers or insights
 - Format numbers nicely (use commas for thousands)
 - Always use 'CZK' as the currency when presenting monetary amounts (Czech Koruna), never '$'. Example: '4,604.81 CZK'
-
-IMPORTANT: Only mention charts or visualizations if explicitly stated in the context above. If no chart path is mentioned in context, DO NOT mention any visualization, chart, or graph in your response."""
+- If a chart was generated, you can briefly mention it exists (e.g., "see the chart for visual breakdown")
+- Do NOT mention file paths or where charts are saved"""
 
         try:
             response = llm.invoke([
@@ -418,13 +546,11 @@ IMPORTANT: Only mention charts or visualizations if explicitly stated in the con
 
             final_response = response.content
 
-            # Add chart notification if generated
-            if chart_path and chart_path.strip():
-                final_response += f"\n\n📊 Chart saved to: {chart_path}"
-
+            # No longer append chart path - UI handles chart display
             return {
                 "final_response": final_response,
                 "messages": [AIMessage(content=final_response)],
+                "show_table": show_table,
             }
 
         except Exception as e:
@@ -432,6 +558,7 @@ IMPORTANT: Only mention charts or visualizations if explicitly stated in the con
             return {
                 "final_response": error_msg,
                 "messages": [AIMessage(content=error_msg)],
+                "show_table": False,
             }
 
     # =========================================================================
@@ -639,6 +766,11 @@ def main():
                     "chart_path": None,
                     "final_response": None,
                     "error": None,
+                    # Artifact fields
+                    "table_columns": None,
+                    "table_rows": None,
+                    "row_count": None,
+                    "show_table": False,
                 }, config=config if config else None)
 
                 # Get final response
