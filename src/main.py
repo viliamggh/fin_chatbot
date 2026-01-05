@@ -3,8 +3,13 @@ fin_chatbot - Natural Language to SQL Chatbot
 
 Phase 11: Multi-Agent System with CLI interface.
 For web interface, run: uv run python app.py
+
+Usage:
+    uv run python main.py              # Normal mode
+    uv run python main.py --verbose    # Audit mode (shows SQL + results)
 """
 
+import argparse
 from typing import Annotated, Literal
 from typing_extensions import TypedDict
 
@@ -172,7 +177,17 @@ Return ONLY the SQL query, nothing else.
 Rules:
 - Only SELECT queries allowed
 - Use proper SQL Server syntax
-- Keep queries efficient"""
+- Keep queries efficient
+
+Important aggregation patterns:
+- For "largest expense": Use MIN(Amount) WHERE Amount < 0 (expenses are negative, most negative = largest)
+- For "smallest expense": Use MAX(Amount) WHERE Amount < 0 (closest to zero)
+- For "largest income": Use MAX(Amount) WHERE Amount > 0
+- For "smallest income": Use MIN(Amount) WHERE Amount > 0
+- Use aggregates (MIN/MAX/SUM/AVG) for single-value questions
+- Use TOP 1 with ORDER BY only when you need multiple columns (like transaction details)
+
+Example: "What was my largest expense?" → SELECT MIN(Amount) as largest_expense FROM Transactions WHERE Amount < 0"""
 
         try:
             response = llm.invoke([
@@ -329,7 +344,7 @@ Explain the error briefly and suggest what might help."""
         if sql_results:
             context_parts.append(f"Query results: {sql_results}")
 
-        if chart_path:
+        if chart_path and chart_path.strip():
             context_parts.append(f"A chart has been generated and saved to: {chart_path}")
 
         context = "\n".join(context_parts)
@@ -341,8 +356,10 @@ Explain the error briefly and suggest what might help."""
 Provide a clear, natural language summary of the results.
 - Be concise but informative
 - Highlight key numbers or insights
-- If a chart was generated, mention that the user can view it
-- Format numbers nicely (use commas for thousands)"""
+- Format numbers nicely (use commas for thousands)
+- Always use 'CZK' as the currency when presenting monetary amounts (Czech Koruna), never '$'. Example: '4,604.81 CZK'
+
+IMPORTANT: Only mention charts or visualizations if explicitly stated in the context above. If no chart path is mentioned in context, DO NOT mention any visualization, chart, or graph in your response."""
 
         try:
             response = llm.invoke([
@@ -353,7 +370,7 @@ Provide a clear, natural language summary of the results.
             final_response = response.content
 
             # Add chart notification if generated
-            if chart_path:
+            if chart_path and chart_path.strip():
                 final_response += f"\n\n📊 Chart saved to: {chart_path}"
 
             return {
@@ -422,9 +439,35 @@ Provide a clear, natural language summary of the results.
     return graph.compile()
 
 
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="fin_chatbot - Natural Language to SQL Chatbot",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  uv run python main.py              # Normal interactive mode
+  uv run python main.py --verbose    # Audit mode with SQL/result logging
+  echo "How many transactions?" | uv run python main.py --verbose
+        """,
+    )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Enable audit mode: show generated SQL and results in parseable format",
+    )
+    return parser.parse_args()
+
+
 def main():
+    # Parse command line arguments
+    args = parse_args()
+
     print("=" * 60)
     print("fin_chatbot - Multi-Agent System (CLI)")
+    if args.verbose:
+        print("AUDIT MODE ENABLED - SQL and results will be logged")
     print("=" * 60)
     print("Agents: Supervisor → SQL → Visualization → Response")
     print("Ask questions about your transactions!")
@@ -558,12 +601,38 @@ def main():
                 else:
                     print("\nAssistant: [No response generated]\n")
 
-                # Debug info
-                if result.get("sql_query"):
-                    print(f"[SQL]: {result['sql_query']}")
-                if result.get("needs_viz"):
-                    print(f"[Viz]: {result.get('chart_type', 'unknown')} chart")
-                if result.get("sql_query") or result.get("needs_viz"):
+                # Audit output (verbose mode) - structured for agent parsing
+                if args.verbose and (result.get("sql_query") or result.get("sql_results")):
+                    print("--- AUDIT START ---")
+                    print(f"QUESTION: {user_input}")
+                    print(f"SQL_GENERATED: {result.get('sql_query', 'N/A')}")
+
+                    # Parse and display SQL results
+                    sql_results_raw = result.get("sql_results", "[]")
+                    try:
+                        result_data = json.loads(sql_results_raw) if sql_results_raw else []
+                        if isinstance(result_data, list):
+                            print(f"RESULT_COUNT: {len(result_data)}")
+                        else:
+                            print("RESULT_COUNT: 1")
+                        # Truncate for readability but keep parseable
+                        truncated = sql_results_raw[:500] if len(sql_results_raw) > 500 else sql_results_raw
+                        print(f"SQL_RESULT: {truncated}")
+                    except json.JSONDecodeError:
+                        print(f"SQL_RESULT: {sql_results_raw}")
+
+                    print(f"FINAL_ANSWER: {result.get('final_response', 'N/A')}")
+                    if result.get("error"):
+                        print(f"ERROR: {result.get('error')}")
+                    print("--- AUDIT END ---")
+                    print()
+
+                # Standard debug info (non-verbose mode)
+                elif result.get("sql_query") or result.get("needs_viz"):
+                    if result.get("sql_query"):
+                        print(f"[SQL]: {result['sql_query']}")
+                    if result.get("needs_viz"):
+                        print(f"[Viz]: {result.get('chart_type', 'unknown')} chart")
                     print()
 
             except Exception as e:
