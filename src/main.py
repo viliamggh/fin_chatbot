@@ -153,7 +153,30 @@ Examples:
     def sql_agent(state: MultiAgentState) -> dict:
         """Generate and execute SQL query."""
         user_question = state["user_question"]
+        messages = state.get("messages", [])
         needs_viz = state.get("needs_viz", False)
+
+        # Build conversation context from recent messages (last 3 turns = 6 messages)
+        conversation_context = ""
+        recent_messages = messages[-7:-1] if len(messages) > 1 else []  # Exclude current question
+        if recent_messages:
+            context_parts = []
+            for msg in recent_messages:
+                role = "User" if isinstance(msg, HumanMessage) else "Assistant"
+                # Truncate long responses to avoid prompt bloat
+                content = msg.content[:300] if len(msg.content) > 300 else msg.content
+                context_parts.append(f"{role}: {content}")
+            conversation_context = f"""
+=== CONVERSATION CONTEXT (CRITICAL - READ CAREFULLY) ===
+{chr(10).join(context_parts)}
+
+CONTEXT CARRYOVER RULES:
+1. If user previously asked about a specific time period (e.g., "December 2025"), ALWAYS include that date filter in the new query
+2. If user says "these transactions", "those", "the same ones" - they mean the SAME data from the previous query
+3. When user adds a new filter (like "only spending account"), ADD it to existing filters, don't replace them
+4. Example: Previous query was for "December 2025", user now says "show only spending account" → keep BOTH the December 2025 AND spending account filters
+=== END CONTEXT ===
+"""
 
         # Adjust prompt based on whether we need viz data
         viz_hint = ""
@@ -182,6 +205,12 @@ Rules:
 - Use proper SQL Server syntax
 - Keep queries efficient
 
+Date handling (CRITICAL):
+- When user mentions a month AND year (e.g., "December 2025"), ALWAYS filter by BOTH:
+  WHERE MONTH(TransactionDate) = 12 AND YEAR(TransactionDate) = 2025
+- NEVER filter by month alone without year - always include YEAR() in date filters
+- For relative dates like "last month", "this year", use GETDATE() for calculations
+
 Important aggregation patterns:
 - For "largest expense": Use MIN(Amount) WHERE Amount < 0 (expenses are negative, most negative = largest)
 - For "smallest expense": Use MAX(Amount) WHERE Amount < 0 (closest to zero)
@@ -196,7 +225,9 @@ AccountID mapping (user terms to database values):
 - If user doesn't specify account, query ALL accounts (no WHERE AccountID filter)
 
 Example: "What was my largest expense?" → SELECT MIN(Amount) as largest_expense FROM Transactions WHERE Amount < 0
-Example: "Show spending account transactions" → SELECT * FROM Transactions WHERE AccountID = 'spending'"""
+Example: "Show spending account transactions" → SELECT * FROM Transactions WHERE AccountID = 'spending'
+Example: "December 2025 transactions" → SELECT * FROM Transactions WHERE MONTH(TransactionDate) = 12 AND YEAR(TransactionDate) = 2025
+{conversation_context}"""
 
         try:
             response = llm.invoke([
