@@ -14,8 +14,8 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "gradio",
-    "langfuse>=2.0.0",
-    "langfuse-langchain",
+    "langfuse==3.11.2",
+    "langfuse-langchain==2.60.10.1",
 ]
 
 [tool.uv]
