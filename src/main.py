@@ -92,7 +92,8 @@ Respond with a JSON object (no markdown, just raw JSON):
 
 Guidelines:
 - needs_sql: true for any data question (amounts, counts, lists, totals)
-- needs_viz: true for trends, comparisons, distributions, "show me", "chart", "graph"
+- needs_viz: true ONLY for aggregated data with trends/comparisons/distributions
+- needs_viz: FALSE for listing individual transactions or showing raw data
 - chart_type:
   - "bar" for category comparisons (by merchant, by type)
   - "line" for time series (by month, by week, trends)
@@ -103,6 +104,8 @@ Examples:
 - "What's my total spend?" → {"needs_sql": true, "needs_viz": false, "chart_type": null}
 - "Show expenses by category" → {"needs_sql": true, "needs_viz": true, "chart_type": "bar"}
 - "How has spending changed over time?" → {"needs_sql": true, "needs_viz": true, "chart_type": "line"}
+- "Show me all transactions" → {"needs_sql": true, "needs_viz": false, "chart_type": null}
+- "List transactions from December" → {"needs_sql": true, "needs_viz": false, "chart_type": null}
 """
 
         try:
@@ -187,7 +190,13 @@ Important aggregation patterns:
 - Use aggregates (MIN/MAX/SUM/AVG) for single-value questions
 - Use TOP 1 with ORDER BY only when you need multiple columns (like transaction details)
 
-Example: "What was my largest expense?" → SELECT MIN(Amount) as largest_expense FROM Transactions WHERE Amount < 0"""
+AccountID mapping (user terms to database values):
+- "spending account" or "spending" → WHERE AccountID = 'spending'
+- "invoices account" or "invoices" → WHERE AccountID = 'invoices'
+- If user doesn't specify account, query ALL accounts (no WHERE AccountID filter)
+
+Example: "What was my largest expense?" → SELECT MIN(Amount) as largest_expense FROM Transactions WHERE Amount < 0
+Example: "Show spending account transactions" → SELECT * FROM Transactions WHERE AccountID = 'spending'"""
 
         try:
             response = llm.invoke([
@@ -257,7 +266,16 @@ Example: "What was my largest expense?" → SELECT MIN(Amount) as largest_expens
 
             # Extract data
             x_values = [str(row.get(x_col, ""))[:20] for row in data]  # Truncate long labels
-            y_values = [float(row.get(y_col, 0)) for row in data]
+
+            # Try to convert y_values to float - handle non-numeric columns
+            try:
+                y_values = [float(row.get(y_col, 0)) for row in data]
+            except (ValueError, TypeError) as e:
+                # Column contains non-numeric data (e.g., dates, strings)
+                return {
+                    "chart_path": None,
+                    "error": f"Cannot visualize: column '{y_col}' contains non-numeric data. Try asking for aggregated data (counts, sums, averages) instead of listing transactions."
+                }
 
             # Create figure
             fig, ax = plt.subplots(figsize=(10, 6))
