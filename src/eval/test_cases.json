@@ -37,37 +37,37 @@
       "id": "smoke_003",
       "category": "aggregation",
       "question": "What is my total income?",
-      "sql_validation": "SELECT SUM(Amount) as income FROM Transactions WHERE Amount > 0",
+      "sql_validation": "SELECT SUM(IncomeAmount) as income FROM Transactions",
       "expected_value": 261653.00,
       "expected_format": "currency",
-      "notes": "Sum of positive amounts. Should report as '261,653.00 CZK'"
+      "notes": "Sum of positive income amounts via helper column. Should report as '261,653.00 CZK'"
     },
     {
       "id": "smoke_004",
       "category": "aggregation",
       "question": "What is my total spending?",
-      "sql_validation": "SELECT SUM(Amount) as spending FROM Transactions WHERE Amount < 0",
-      "expected_value": -257048.19,
+      "sql_validation": "SELECT SUM(SpendAmount) as spending FROM Transactions",
+      "expected_value": 257048.19,
       "expected_format": "currency",
-      "notes": "SQL returns negative (-257,048.19). Chatbot SHOULD report positive ('257,048.19 CZK spent') or accept negative with correct currency. FAIL if uses '$' instead of 'CZK'."
+      "notes": "Sum of positive spend amounts via helper column. Should report as '257,048.19 CZK'. FAIL if uses '$' instead of 'CZK'."
     },
     {
       "id": "smoke_005",
       "category": "aggregation",
       "question": "What was my largest expense?",
-      "sql_validation": "SELECT MIN(Amount) as largest_expense FROM Transactions WHERE Amount < 0",
-      "expected_value": -230000.00,
+      "sql_validation": "SELECT MAX(SpendAmount) as largest_expense FROM Transactions WHERE SpendAmount > 0",
+      "expected_value": 230000.00,
       "expected_format": "currency",
-      "notes": "MIN because expenses are negative. Most negative = largest expense. Chatbot should report '230,000.00 CZK' (positive) or '-230,000.00 CZK' (negative with correct currency)."
+      "notes": "Largest spend via helper column. Chatbot should report '230,000.00 CZK' with correct currency."
     },
     {
       "id": "smoke_006",
       "category": "aggregation",
       "question": "What was my largest income?",
-      "sql_validation": "SELECT MAX(Amount) as largest_income FROM Transactions WHERE Amount > 0",
+      "sql_validation": "SELECT MAX(IncomeAmount) as largest_income FROM Transactions",
       "expected_value": 233653.00,
       "expected_format": "currency",
-      "notes": "MAX of positive amounts. Should report '233,653.00 CZK'"
+      "notes": "Largest income via helper column. Should report '233,653.00 CZK'"
     },
     {
       "id": "smoke_007",

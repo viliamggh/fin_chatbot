@@ -234,16 +234,29 @@ Rules:
 - Keep queries efficient
 
 Date handling (CRITICAL):
-- When user mentions a month AND year (e.g., "December 2025"), ALWAYS filter by BOTH:
-  WHERE MONTH(TransactionDate) = 12 AND YEAR(TransactionDate) = 2025
-- NEVER filter by month alone without year - always include YEAR() in date filters
+- When user mentions a month AND year (e.g., "December 2025"), prefer an indexed date range filter:
+  WHERE TransactionDate >= '2025-12-01' AND TransactionDate < '2026-01-01'
+- If YearMonth exists, you MAY use: WHERE YearMonth = 202512
+- NEVER filter by month alone without year (avoid MONTH(TransactionDate)=12 without YEAR())
+- Prefer avoiding MONTH()/YEAR() filters when possible (they can prevent index usage)
 - For relative dates like "last month", "this year", use GETDATE() for calculations
 
+Cashflow handling (CRITICAL):
+- If available, prefer these helper columns for reliability:
+  - CashflowDirection: 'income' | 'spend' | 'neutral'
+  - SpendAmount: positive amount for spend rows (0 otherwise)
+  - IncomeAmount: positive amount for income rows (0 otherwise)
+- For "total spending": SUM(SpendAmount)
+- For "total income": SUM(IncomeAmount)
+- For "largest expense": MAX(SpendAmount) WHERE SpendAmount > 0
+- For "smallest expense": MIN(SpendAmount) WHERE SpendAmount > 0
+- For "largest income": MAX(IncomeAmount) WHERE IncomeAmount > 0
+- For "smallest income": MIN(IncomeAmount) WHERE IncomeAmount > 0
+- If helper columns are NOT available, fall back to Amount sign:
+  - spend: Amount < 0 (use ABS() when presenting spending totals if needed)
+  - income: Amount > 0
+
 Important aggregation patterns:
-- For "largest expense": Use MIN(Amount) WHERE Amount < 0 (expenses are negative, most negative = largest)
-- For "smallest expense": Use MAX(Amount) WHERE Amount < 0 (closest to zero)
-- For "largest income": Use MAX(Amount) WHERE Amount > 0
-- For "smallest income": Use MIN(Amount) WHERE Amount > 0
 - Use aggregates (MIN/MAX/SUM/AVG) for single-value questions
 - Use TOP 1 with ORDER BY only when you need multiple columns (like transaction details)
 
@@ -252,9 +265,9 @@ AccountID mapping (user terms to database values):
 - "invoices account" or "invoices" → WHERE AccountID = 'invoices'
 - If user doesn't specify account, query ALL accounts (no WHERE AccountID filter)
 
-Example: "What was my largest expense?" → SELECT MIN(Amount) as largest_expense FROM Transactions WHERE Amount < 0
+Example: "What was my largest expense?" → SELECT MAX(SpendAmount) as largest_expense FROM Transactions WHERE SpendAmount > 0
 Example: "Show spending account transactions" → SELECT * FROM Transactions WHERE AccountID = 'spending'
-Example: "December 2025 transactions" → SELECT * FROM Transactions WHERE MONTH(TransactionDate) = 12 AND YEAR(TransactionDate) = 2025
+Example: "December 2025 transactions" → SELECT * FROM Transactions WHERE TransactionDate >= '2025-12-01' AND TransactionDate < '2026-01-01'
 {conversation_context}"""
 
         try:

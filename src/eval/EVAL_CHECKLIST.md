@@ -9,7 +9,7 @@ cd /Users/viliamgago/Projects/FinanceAssistant/fin_chatbot/src
 uv run python eval/run_evaluation.py
 ```
 
-**Expected**: 8/8 tests passing (100%)
+**Expected**: 9/9 tests passing (100%)
 
 If any failures, check the JSON report in `eval/reports/` for details.
 
@@ -32,7 +32,7 @@ Use the chatbot-evaluator agent to test "How many transactions do I have?"
 
 ## Full Test Suite Details
 
-The smoke suite tests these 8 cases:
+The smoke suite tests these 9 cases:
 
 | ID | Category | Question | Expected |
 |----|----------|----------|----------|
@@ -40,10 +40,11 @@ The smoke suite tests these 8 cases:
 | smoke_002 | aggregation | Net balance | 4604.81 CZK |
 | smoke_003 | aggregation | Total income | 261653.00 CZK |
 | smoke_004 | aggregation | Total spending | 257048.19 CZK |
-| smoke_005 | aggregation | Largest expense | 33638.00 CZK |
-| smoke_006 | aggregation | Largest income | 78000.00 CZK |
+| smoke_005 | aggregation | Largest expense | 230000.00 CZK |
+| smoke_006 | aggregation | Largest income | 233653.00 CZK |
 | smoke_007 | aggregation | Average transaction | ~100.10 CZK |
 | smoke_008 | date_filtering | December 2025 count | (verified) |
+| smoke_009 | account_filtering | Spending account Dec 2025 | (verified) |
 
 ---
 
